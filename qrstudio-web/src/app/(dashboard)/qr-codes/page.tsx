@@ -42,7 +42,7 @@ export default async function QRCodesListPage() {
         }
       />
       <p className="text-sm text-muted-foreground">
-        La vue liste complète sera bientôt disponible.
+        Utilisez le bouton ci-dessus pour créer un nouveau QR code.
       </p>
     </div>
   )

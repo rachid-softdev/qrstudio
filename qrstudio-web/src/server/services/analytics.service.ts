@@ -190,10 +190,18 @@ export const analyticsService = {
       take: 10000,
     })
 
+    function esc(value: string | null | undefined): string {
+      const str = value ?? ''
+      if (/[,"\n\r]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`
+      }
+      return str
+    }
+
     const header = 'Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent'
     const rows = scans.map((s) => {
       const date = s.scannedAt.toISOString()
-      return `${date},${s.ipHash ?? ''},${s.country ?? ''},${s.city ?? ''},${s.deviceType ?? ''},${s.os ?? ''},${s.browser ?? ''},${s.referer ?? ''}`
+      return `${esc(date)},${esc(s.ipHash)},${esc(s.country)},${esc(s.city)},${esc(s.deviceType)},${esc(s.os)},${esc(s.browser)},${esc(s.referer)}`
     })
 
     return [header, ...rows].join('\n')

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 const prismaMock = vi.hoisted(() => {
   const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "count"]) => {
@@ -152,6 +152,10 @@ describe("analyticsService", () => {
   })
 
   describe("getDashboardStats", () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
     it("should return dashboard stats with computed values", async () => {
       const now = new Date("2024-06-01T12:00:00Z")
       vi.useFakeTimers()
@@ -186,8 +190,6 @@ describe("analyticsService", () => {
       expect(result.scansLast7Days[0].scans).toBe(1)
       expect(result.scansLast7Days[1].date).toBe("2024-05-27")
       expect(result.scansLast7Days[1].scans).toBe(2)
-
-      vi.useRealTimers()
     })
 
     it("should return at least 1 for totalMembers", async () => {
