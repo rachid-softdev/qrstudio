@@ -131,4 +131,93 @@ describe("qrService", () => {
       await expect(qrService.create(baseInput)).rejects.toMatchObject({ code: "FORBIDDEN" })
     })
   })
+
+  describe("update", () => {
+    const existingQR = {
+      id: "qr-1",
+      workspaceId: "ws-1",
+      type: "URL",
+      shortCode: "abc123",
+      destinationUrl: "https://old.com",
+      fgColor: "#000000",
+      bgColor: "#FFFFFF",
+      moduleShape: "square",
+      logoUrl: null,
+      frameType: null,
+      frameLabel: null,
+      wifiSsid: null,
+      wifiPassword: null,
+      wifiEncryption: null,
+      vcardJson: null,
+      textContent: null,
+      landingPageId: null,
+      landingPage: null,
+    }
+
+    it("should update destination URL", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(existingQR as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      const result = await qrService.update("qr-1", "ws-1", { destinationUrl: "https://new.com" })
+
+      expect(result.id).toBe("qr-1")
+      expect(result.svgContent).toBeUndefined()
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-1" },
+        data: { destinationUrl: "https://new.com" },
+      })
+    })
+
+    it("should update name and destinationUrl together", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(existingQR as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      const result = await qrService.update("qr-1", "ws-1", { name: "New Name", destinationUrl: "https://new.com" })
+
+      expect(result.id).toBe("qr-1")
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-1" },
+        data: { name: "New Name", destinationUrl: "https://new.com" },
+      })
+    })
+
+    it("should regenerate SVG when design changes", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(existingQR as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      const result = await qrService.update("qr-1", "ws-1", { fgColor: "#FF0000" })
+
+      expect(result.id).toBe("qr-1")
+      expect(result.svgContent).toBe("<svg></svg>")
+    })
+
+    it("should update WIFI type QR code", async () => {
+      const existingWifi = {
+        ...existingQR,
+        type: "WIFI",
+        destinationUrl: null,
+        wifiSsid: "OldNet",
+        wifiPassword: "oldpass",
+        wifiEncryption: "WPA",
+      }
+      prismaMock.qRCode.findFirst.mockResolvedValue(existingWifi as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      await qrService.update("qr-2", "ws-1", {
+        wifi: { ssid: "NewNet", password: "newpass", encryption: "WPA" },
+      })
+
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-2" },
+        data: { wifiSsid: "NewNet", wifiPassword: "newpass", wifiEncryption: "WPA" },
+      })
+    })
+
+    it("should throw NOT_FOUND if QR code does not exist", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrService.update("nonexistent", "ws-1", { name: "Hack" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+  })
 })

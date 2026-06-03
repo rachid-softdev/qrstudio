@@ -11,6 +11,7 @@ const prismaMock = vi.hoisted(() => {
   return {
     qRCode: model(),
     scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count", "groupBy"]),
+    workspaceMember: model(),
   }
 })
 
@@ -82,6 +83,151 @@ describe("analyticsService", () => {
       expect(createData.ipHash).toBeNull()
       // No ipHash -> no uniqueScans check -> only 1 update
       expect(prismaMock.qRCode.update).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("getAnalytics", () => {
+    it("should return analytics for 7d period", async () => {
+      prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 10, uniqueScans: 5 } as never)
+      prismaMock.scan.findMany.mockResolvedValue([
+        { scannedAt: new Date("2024-01-15T10:00:00Z") },
+        { scannedAt: new Date("2024-01-15T12:00:00Z") },
+      ] as never)
+      prismaMock.scan.groupBy.mockResolvedValue([
+        { country: "France", _count: 2 },
+      ] as never)
+
+      const result = await analyticsService.getAnalytics("qr-1", "7d")
+
+      expect(result.totalScans).toBe(10)
+      expect(result.uniqueScans).toBe(5)
+      expect(result.scansByDay).toHaveLength(1)
+      expect(result.scansByDay[0].date).toBe("2024-01-15")
+      expect(result.scansByDay[0].scans).toBe(2)
+      expect(result.byCountry).toHaveLength(1)
+      expect(result.byCountry[0].country).toBe("France")
+      expect(result.byDevice).toHaveLength(1)
+      expect(result.byOs).toHaveLength(1)
+    })
+
+    it("should return analytics for 30d period", async () => {
+      prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 20, uniqueScans: 8 } as never)
+      prismaMock.scan.findMany.mockResolvedValue([] as never)
+      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+
+      const result = await analyticsService.getAnalytics("qr-1", "30d")
+
+      expect(result.totalScans).toBe(20)
+      expect(result.uniqueScans).toBe(8)
+      expect(result.scansByDay).toEqual([])
+    })
+
+    it("should return analytics for 90d period", async () => {
+      prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 50, uniqueScans: 25 } as never)
+      prismaMock.scan.findMany.mockResolvedValue([] as never)
+      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+
+      const result = await analyticsService.getAnalytics("qr-1", "90d")
+      expect(result.totalScans).toBe(50)
+    })
+
+    it("should return analytics for 'all' period (no date filter)", async () => {
+      prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 100, uniqueScans: 40 } as never)
+      prismaMock.scan.findMany.mockResolvedValue([] as never)
+      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+
+      const result = await analyticsService.getAnalytics("qr-1", "all")
+      expect(result.totalScans).toBe(100)
+    })
+
+    it("should return zero values when qrCode is null", async () => {
+      prismaMock.qRCode.findUnique.mockResolvedValue(null)
+      prismaMock.scan.findMany.mockResolvedValue([] as never)
+      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+
+      const result = await analyticsService.getAnalytics("nonexistent", "7d")
+      expect(result.totalScans).toBe(0)
+      expect(result.uniqueScans).toBe(0)
+    })
+  })
+
+  describe("getDashboardStats", () => {
+    it("should return dashboard stats with computed values", async () => {
+      const now = new Date("2024-06-01T12:00:00Z")
+      vi.useFakeTimers()
+      vi.setSystemTime(now)
+
+      prismaMock.qRCode.count.mockResolvedValue(10)
+      prismaMock.qRCode.findMany
+        .mockResolvedValueOnce([
+          { id: "qr-1", name: "Recent QR", shortCode: "a1", type: "URL", status: "ACTIVE", totalScans: 5, lastScannedAt: null, createdAt: new Date() },
+        ] as never)
+        .mockResolvedValueOnce([
+          { id: "qr-2", name: "Top QR", shortCode: "b2", type: "URL", totalScans: 100, status: "ACTIVE", lastScannedAt: null, createdAt: new Date() },
+        ] as never)
+      prismaMock.scan.count.mockResolvedValue(3)
+      prismaMock.workspaceMember.count.mockResolvedValue(2)
+      prismaMock.scan.findMany.mockResolvedValue([
+        { scannedAt: new Date("2024-05-26T10:00:00Z") },
+        { scannedAt: new Date("2024-05-27T10:00:00Z") },
+        { scannedAt: new Date("2024-05-27T12:00:00Z") },
+      ] as never)
+
+      const result = await analyticsService.getDashboardStats("ws-1")
+
+      expect(result.totalQRCodes).toBe(10)
+      expect(result.totalScansToday).toBe(3)
+      expect(result.totalMembers).toBe(2)
+      expect(result.recentQRCodes).toHaveLength(1)
+      expect(result.topQRCodes).toHaveLength(1)
+      expect(result.scansLast7Days).toHaveLength(7)
+      // 2024-06-01 is Saturday, 7 days before is 2024-05-26 (Sunday)
+      expect(result.scansLast7Days[0].date).toBe("2024-05-26")
+      expect(result.scansLast7Days[0].scans).toBe(1)
+      expect(result.scansLast7Days[1].date).toBe("2024-05-27")
+      expect(result.scansLast7Days[1].scans).toBe(2)
+
+      vi.useRealTimers()
+    })
+
+    it("should return at least 1 for totalMembers", async () => {
+      prismaMock.qRCode.count.mockResolvedValue(0)
+      prismaMock.qRCode.findMany.mockResolvedValue([] as never)
+      prismaMock.scan.count.mockResolvedValue(0)
+      prismaMock.workspaceMember.count.mockResolvedValue(0)
+      prismaMock.scan.findMany.mockResolvedValue([] as never)
+
+      const result = await analyticsService.getDashboardStats("ws-empty")
+      expect(result.totalMembers).toBe(1)
+      expect(result.totalQRCodes).toBe(0)
+      expect(result.totalScansToday).toBe(0)
+    })
+  })
+
+  describe("exportCSV", () => {
+    it("should export CSV with header and rows", async () => {
+      prismaMock.scan.findMany.mockResolvedValue([
+        { scannedAt: new Date("2024-01-15T10:00:00Z"), ipHash: "abc123", country: "France", city: "Paris", deviceType: "mobile", os: "iOS", browser: "Safari", referer: "https://google.com" },
+        { scannedAt: new Date("2024-01-16T14:00:00Z"), ipHash: "def456", country: "Germany", city: null, deviceType: "desktop", os: "Windows", browser: "Chrome", referer: null },
+      ] as never)
+
+      const csv = await analyticsService.exportCSV("qr-1", "30d")
+
+      const lines = csv.split("\n")
+      expect(lines[0]).toBe("Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent")
+      expect(lines[1]).toContain("France")
+      expect(lines[1]).toContain("Paris")
+      expect(lines[1]).toContain("mobile")
+      expect(lines[2]).toContain("Germany")
+      expect(lines[2]).toContain("desktop")
+      expect(lines).toHaveLength(3) // header + 2 data rows
+    })
+
+    it("should export CSV with only header when no scans", async () => {
+      prismaMock.scan.findMany.mockResolvedValue([] as never)
+
+      const csv = await analyticsService.exportCSV("qr-empty", "7d")
+      expect(csv).toBe("Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent")
     })
   })
 })

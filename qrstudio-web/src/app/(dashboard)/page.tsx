@@ -49,7 +49,7 @@ export default async function DashboardPage() {
           description="Commencez par créer un QR code dynamique pour votre contenu."
           action={{
             label: "Nouveau QR code",
-            href: "/",
+            href: "/dashboard/qr/new",
           }}
         />
       </div>
@@ -64,7 +64,7 @@ export default async function DashboardPage() {
         title={`Bienvenue sur QR Studio, ${userName}`}
         description="Gérez vos QR codes dynamiques et suivez leurs performances."
         actions={
-          <Link href="/">
+          <Link href="/dashboard/qr/new">
             <Button variant="default" size="sm">
               <PlusIcon className="size-4" />
               Nouveau QR code

@@ -12,10 +12,10 @@ export function parseDevice(ua: string): 'mobile' | 'tablet' | 'desktop' {
 export function parseOs(ua: string): string {
   const lower = ua.toLowerCase()
   if (/windows/i.test(lower)) return 'Windows'
+  if (/iphone|ipad|ipod/i.test(lower)) return 'iOS'
   if (/mac os|macintosh/i.test(lower)) return 'macOS'
   if (/linux/i.test(lower) && !/android/i.test(lower)) return 'Linux'
   if (/android/i.test(lower)) return 'Android'
-  if (/iphone|ipad|ipod/i.test(lower)) return 'iOS'
   if (/chrome os|cros/i.test(lower)) return 'Chrome OS'
   return 'Autre'
 }

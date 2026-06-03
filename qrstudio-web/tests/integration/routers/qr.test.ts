@@ -13,7 +13,7 @@ const prismaMock = vi.hoisted(() => {
     qRCode: model(),
     workspace: model(),
     workspaceMember: model(),
-    scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count"]),
+    scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count", "groupBy"]),
     landingPage: model(["findUnique", "findFirst", "create", "update"]),
     user: model(),
   }
@@ -103,11 +103,31 @@ describe("qrRouter", () => {
       prismaMock.qRCode.findFirst
         .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1" } as never)
         .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1", type: "URL", destinationUrl: "https://old.com", fgColor: "#000", bgColor: "#FFF", moduleShape: "square" } as never)
-      prismaMock.workspaceMember.findFirst.mockResolvedValue({ role: "EDITOR" } as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
 
       const result = await qrRouter.createCaller(authed()).update({ id: "qr-1", workspaceId: "ws-1", name: "Updated" })
       expect(result.id).toBe("qr-1")
+    })
+
+    it("should update destination URL and regenerate SVG when design changes", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst
+        .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1" } as never)
+        .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1", type: "URL", destinationUrl: "https://old.com", fgColor: "#000", bgColor: "#FFF", moduleShape: "square" } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      const result = await qrRouter.createCaller(authed()).update({
+        id: "qr-1", workspaceId: "ws-1", name: "Styled", fgColor: "#FF0000",
+      })
+      expect(result.id).toBe("qr-1")
+    })
+
+    it("should throw NOT_FOUND if QR code does not exist", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValueOnce(null)
+
+      await expect(qrRouter.createCaller(authed()).update({ id: "nonexistent", workspaceId: "ws-1", name: "Nope" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
     })
 
     it("should throw FORBIDDEN if viewer", async () => {
@@ -148,6 +168,47 @@ describe("qrRouter", () => {
 
       await expect(qrRouter.createCaller(authed("user-2", "ws-1")).delete({ id: "qr-1", workspaceId: "ws-1" }))
         .rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+  })
+
+  describe("getAnalytics", () => {
+    it("should return analytics for a QR code", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
+      prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 10, uniqueScans: 5 } as never)
+      prismaMock.scan.findMany.mockResolvedValue([
+        { scannedAt: new Date("2024-06-01T10:00:00Z") },
+      ] as never)
+      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+
+      const result = await qrRouter.createCaller(authed()).getAnalytics({
+        qrCodeId: "qr-1", workspaceId: "ws-1", period: "7d",
+      })
+      expect(result.totalScans).toBe(10)
+      expect(result.uniqueScans).toBe(5)
+      expect(result.scansByDay).toHaveLength(1)
+    })
+
+    it("should throw NOT_FOUND if QR code does not exist", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrRouter.createCaller(authed()).getAnalytics({
+        qrCodeId: "nonexistent", workspaceId: "ws-1", period: "30d",
+      })).rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should default period to 30d", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
+      prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 0, uniqueScans: 0 } as never)
+      prismaMock.scan.findMany.mockResolvedValue([] as never)
+      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+
+      const result = await qrRouter.createCaller(authed()).getAnalytics({
+        qrCodeId: "qr-1", workspaceId: "ws-1",
+      })
+      expect(result.totalScans).toBe(0)
     })
   })
 })
