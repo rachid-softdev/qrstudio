@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Plan {
+  FREE
+  PRO
+  AGENCY
+}
+
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum QRType {
+  URL
+  WHATSAPP
+  WIFI
+  VCARD
+  PDF
+  TEXT
+  LANDING_PAGE
+}
+
+enum QRStatus {
+  ACTIVE
+  PAUSED
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  passwordHash  String?
+  plan          Plan      @default(FREE)
+  stripeCustomerId   String?  @unique
+  stripeSubscriptionId String? @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  workspaces    WorkspaceMember[]
+  ownedWorkspaces Workspace[]
+  apiKeys       ApiKey[]
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Workspace ───────────────────────────────────────────────────────────────
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner     User              @relation(fields: [ownerId], references: [id])
+  members   WorkspaceMember[]
+  qrCodes   QRCode[]
+  invitations WorkspaceInvitation[]
+
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        Role     @default(VIEWER)
+  joinedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model WorkspaceInvitation {
+  id          String   @id @default(cuid())
+  workspaceId String
+  email       String
+  role        Role     @default(EDITOR)
+  token       String   @unique @default(cuid())
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([token])
+}
+
+// ─── QR Codes ────────────────────────────────────────────────────────────────
+
+model QRCode {
+  id          String   @id @default(cuid())
+  workspaceId String
+  shortCode   String   @unique
+  name        String
+  type        QRType
+  status      QRStatus @default(ACTIVE)
+
+  destinationUrl  String?
+  wifiSsid        String?
+  wifiPassword    String?
+  wifiEncryption  String?
+  vcardJson       String?   @db.Text
+  textContent     String?   @db.Text
+  landingPageId   String?   @unique
+
+  fgColor         String    @default("#000000")
+  bgColor         String    @default("#FFFFFF")
+  logoUrl         String?
+  moduleShape     String    @default("square")
+  frameType       String?
+  frameLabel      String?
+
+  totalScans      Int       @default(0)
+  uniqueScans     Int       @default(0)
+  lastScannedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scans       Scan[]
+  landingPage LandingPage? @relation(fields: [landingPageId], references: [id])
+
+  @@index([workspaceId])
+  @@index([shortCode])
+  @@index([createdAt])
+}
+
+model LandingPage {
+  id          String  @id @default(cuid())
+  title       String
+  description String? @db.Text
+  ctaLabel    String?
+  ctaUrl      String?
+  imageUrl    String?
+  bgColor     String  @default("#FFFFFF")
+  textColor   String  @default("#111827")
+
+  qrCode QRCode?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Analytics ───────────────────────────────────────────────────────────────
+
+model Scan {
+  id          String   @id @default(cuid())
+  qrCodeId    String
+  scannedAt   DateTime @default(now())
+
+  ipHash      String?
+  country     String?
+  city        String?
+  deviceType  String?
+  os          String?
+  browser     String?
+  referer     String?  @db.Text
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  @@index([qrCodeId])
+  @@index([qrCodeId, scannedAt])
+  @@index([scannedAt])
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  userId    String
+  name      String
+  keyHash   String    @unique
+  keyPrefix String
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+}

@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+desktop-electron/node_modules/
+desktop-electron/dist/
+desktop-electron/dist-electron/
+desktop-electron/release/
+promptbearer-desktop-electron/dist/
+promptbearer-desktop-electron/dist-electron/
+promptbearer-desktop-electron/release/
+
+# Environment
+# .env committed (non-sensitive defaults), .env*.local gitignored
+.env*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# Build artifacts
+.next/
+tsconfig.tsbuildinfo
+
+# Test artifacts
+playwright-report/
+
+# Misc
+*.db
+*.db-shm
+*.db-wal
