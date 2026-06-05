@@ -6,6 +6,7 @@ import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 import { PlusIcon } from "lucide-react"
 import Link from "next/link"
+import { QRCodeListClient } from "./qr-code-list-client"
 
 export const metadata: Metadata = {
   title: "QR Codes — QR Studio",
@@ -41,9 +42,7 @@ export default async function QRCodesListPage() {
           </Link>
         }
       />
-      <p className="text-sm text-muted-foreground">
-        Utilisez le bouton ci-dessus pour créer un nouveau QR code.
-      </p>
+      <QRCodeListClient workspaceId={workspace.id} />
     </div>
   )
 }

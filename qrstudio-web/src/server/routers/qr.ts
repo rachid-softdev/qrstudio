@@ -5,8 +5,8 @@ import { prisma } from "@/server/db"
 import { qrService } from "@/server/services/qr.service"
 import { analyticsService } from "@/server/services/analytics.service"
 import { QRCreateSchema, QRUpdateSchema } from "@/lib/validations"
-import { generateQRSvg, generateQrPngBuffer } from "@/lib/qr-generator"
-import type { QRType, QRStatus } from "@prisma/client"
+import { generateQRSvg, generateQrPngBuffer, generateQrPdfBuffer } from "@/lib/qr-generator"
+import type { QRStatus } from "@prisma/client"
 
 const QRTypeEnum = z.enum(['URL','WHATSAPP','WIFI','VCARD','PDF','TEXT','LANDING_PAGE'])
 const QRStatusEnum = z.enum(['ACTIVE','PAUSED'])
@@ -117,23 +117,8 @@ export const qrRouter = router({
   updateStatus: workspaceProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string(), status: QRStatusEnum }))
     .mutation(async ({ ctx, input }) => {
-      const workspace = await workspaceQuery(ctx, input.workspaceId)
-      const existing = await prisma.qRCode.findFirst({
-        where: { id: input.id, workspaceId: input.workspaceId },
-      })
-
-      if (!existing) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
-      }
-
-      if (workspace.role === 'VIEWER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Action non autorisée' })
-      }
-
-      return prisma.qRCode.update({
-        where: { id: input.id },
-        data: { status: input.status as QRStatus },
-      })
+      await qrService.updateStatus(input.id, input.workspaceId, input.status as QRStatus, ctx.user!.id)
+      return { success: true }
     }),
 
   delete: workspaceProcedure
@@ -167,6 +152,15 @@ export const qrRouter = router({
     .input(z.object({ qrCodeId: z.string(), workspaceId: z.string(), period: PeriodEnum.default('30d') }))
     .query(async ({ ctx, input }) => {
       await workspaceQuery(ctx, input.workspaceId)
+
+      // Récupérer le plan pour calculer la rétention
+      const user = await prisma.user.findUnique({
+        where: { id: ctx.user!.id },
+        select: { plan: true },
+      })
+      const retentionDays = user?.plan === 'FREE' ? 30 : user?.plan === 'PRO' ? 365 : undefined
+
+      // Vérifier que le QR code existe avant d'appeler le service
       const existing = await prisma.qRCode.findFirst({
         where: { id: input.qrCodeId, workspaceId: input.workspaceId },
       })
@@ -175,7 +169,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      return analyticsService.getAnalytics(input.qrCodeId, input.period)
+      return analyticsService.getAnalytics(input.qrCodeId, input.period, retentionDays)
     }),
 
   getDashboardStats: workspaceProcedure
@@ -212,7 +206,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      const svg = await generateQRSvg(buildQRData(qrCode), {
+      const svg = await generateQRSvg(qrService.prepareQRDataFromEntity(qrCode), {
         fgColor: qrCode.fgColor, bgColor: qrCode.bgColor,
         moduleShape: qrCode.moduleShape as 'square' | 'rounded' | 'dots',
         logoUrl: qrCode.logoUrl ?? undefined,
@@ -235,7 +229,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      const buffer = await generateQrPngBuffer(buildQRData(qrCode), {
+      const buffer = await generateQrPngBuffer(qrService.prepareQRDataFromEntity(qrCode), {
         fgColor: qrCode.fgColor, bgColor: qrCode.bgColor,
         moduleShape: qrCode.moduleShape as 'square' | 'rounded' | 'dots',
         logoUrl: qrCode.logoUrl ?? undefined,
@@ -245,40 +239,27 @@ export const qrRouter = router({
 
       return { base64: buffer.toString('base64') }
     }),
-})
 
-function buildQRData(qrCode: {
-  type: string
-  destinationUrl: string | null
-  wifiSsid: string | null
-  wifiPassword: string | null
-  wifiEncryption: string | null
-  vcardJson: string | null
-  textContent: string | null
-  shortCode: string
-}): string {
-  switch (qrCode.type as QRType) {
-    case 'URL':
-      return qrCode.destinationUrl ?? ''
-    case 'WHATSAPP': {
-      const phone = qrCode.destinationUrl ?? ''
-      return `https://wa.me/${phone.replace(/[^0-9]/g, '')}`
-    }
-    case 'WIFI': {
-      const ssid = qrCode.wifiSsid ?? ''
-      const password = qrCode.wifiPassword ?? ''
-      const encryption = qrCode.wifiEncryption ?? 'nopass'
-      return `WIFI:T:${encryption};S:${ssid};P:${password};`
-    }
-    case 'VCARD':
-      return qrCode.vcardJson ?? ''
-    case 'PDF':
-      return qrCode.destinationUrl ?? ''
-    case 'TEXT':
-      return qrCode.textContent ?? ''
-    case 'LANDING_PAGE': {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-      return `${appUrl}/l/${qrCode.shortCode}`
-    }
-  }
-}
+  exportPdf: workspaceProcedure
+    .input(z.object({ id: z.string(), workspaceId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await workspaceQuery(ctx, input.workspaceId)
+      const qrCode = await prisma.qRCode.findFirst({
+        where: { id: input.id, workspaceId: input.workspaceId },
+      })
+
+      if (!qrCode) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
+      }
+
+      const buffer = await generateQrPdfBuffer(qrService.prepareQRDataFromEntity(qrCode), {
+        fgColor: qrCode.fgColor, bgColor: qrCode.bgColor,
+        moduleShape: qrCode.moduleShape as 'square' | 'rounded' | 'dots',
+        logoUrl: qrCode.logoUrl ?? undefined,
+        frameType: qrCode.frameType ?? undefined,
+        frameLabel: qrCode.frameLabel ?? undefined,
+      })
+
+      return { base64: buffer.toString('base64') }
+    }),
+})

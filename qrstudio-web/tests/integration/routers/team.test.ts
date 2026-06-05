@@ -77,6 +77,53 @@ describe("teamRouter", () => {
     })
   })
 
+  describe("listMembers", () => {
+    it("should return all workspace members", async () => {
+      prismaMock.workspaceMember.findUnique.mockResolvedValue({ id: "m1", role: "OWNER" } as never)
+      prismaMock.workspaceMember.findMany.mockResolvedValue([
+        { id: "m1", userId: "u1", role: "OWNER", joinedAt: new Date(), user: { id: "u1", name: "Alice", email: "alice@t.com", image: null } },
+        { id: "m2", userId: "u2", role: "EDITOR", joinedAt: new Date(), user: { id: "u2", name: "Bob", email: "bob@t.com", image: null } },
+      ] as never)
+
+      const result = await teamRouter.createCaller(authed()).listMembers({ workspaceId: "ws-1" })
+      expect(result).toHaveLength(2)
+      expect(result[0].user.name).toBe("Alice")
+      expect(result[1].role).toBe("EDITOR")
+    })
+
+    it("should throw FORBIDDEN if user is not a workspace member", async () => {
+      prismaMock.workspaceMember.findUnique.mockResolvedValue(null)
+
+      await expect(teamRouter.createCaller(authed("outsider")).listMembers({ workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+
+    it("should throw UNAUTHORIZED if not logged in", async () => {
+      await expect(teamRouter.createCaller(ctx()).listMembers({ workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "UNAUTHORIZED" })
+    })
+
+    it("should return members ordered by joinedAt ascending", async () => {
+      prismaMock.workspaceMember.findUnique.mockResolvedValue({ id: "m1", role: "OWNER" } as never)
+      prismaMock.workspaceMember.findMany.mockResolvedValue([
+        { id: "m1", userId: "u1", role: "OWNER", joinedAt: new Date("2024-01-01"), user: { id: "u1", name: "A", email: "a@t.com", image: null } },
+        { id: "m2", userId: "u2", role: "EDITOR", joinedAt: new Date("2024-06-01"), user: { id: "u2", name: "B", email: "b@t.com", image: null } },
+      ] as never)
+
+      const result = await teamRouter.createCaller(authed()).listMembers({ workspaceId: "ws-1" })
+      expect(result[0].joinedAt).toEqual(new Date("2024-01-01"))
+      expect(result[1].joinedAt).toEqual(new Date("2024-06-01"))
+    })
+
+    it("should return empty array if only the requester is a member", async () => {
+      prismaMock.workspaceMember.findUnique.mockResolvedValue({ id: "m1", role: "OWNER" } as never)
+      prismaMock.workspaceMember.findMany.mockResolvedValue([] as never)
+
+      const result = await teamRouter.createCaller(authed()).listMembers({ workspaceId: "ws-1" })
+      expect(result).toHaveLength(0)
+    })
+  })
+
   describe("removeMember", () => {
     it("should allow OWNER to remove a member", async () => {
       prismaMock.workspaceMember.findUnique

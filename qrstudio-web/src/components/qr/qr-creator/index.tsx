@@ -1,7 +1,6 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useCallback } from "react"
 import { toast } from "sonner"
 import type { QRType } from "@/types/index"
 import type { ModuleShape } from "@/lib/qr-generator"
@@ -60,7 +59,6 @@ interface QRCreatorProps {
 }
 
 export function QRCreator({ workspaceId }: QRCreatorProps) {
-  const router = useRouter()
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState<QRType | null>(null)
   const [content, setContent] = useState<Record<string, unknown>>({})
@@ -74,7 +72,10 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
     logoUrl: null as string | null,
   })
   const [loading, setLoading] = useState(false)
+  const [createdQrId, setCreatedQrId] = useState<string | null>(null)
+  const [createdShortCode, setCreatedShortCode] = useState<string | null>(null)
 
+  const utils = api.useUtils()
   const createMutation = api.qr.create.useMutation()
 
   const qrData = selectedType ? computeQRData(selectedType, content) : ""
@@ -101,9 +102,10 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
         delete payload.destinationUrl
       }
 
-      await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0])
+      const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0])
+      setCreatedQrId(result.id)
+      setCreatedShortCode(result.shortCode)
       toast.success("QR code créé avec succès !")
-      router.push("/dashboard/qr-codes")
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur lors de la création"
       toast.error(message)
@@ -111,6 +113,57 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
       setLoading(false)
     }
   }
+
+  const handleExportPng = useCallback(async () => {
+    if (!createdQrId) {
+      toast.error("Créez d'abord un QR code")
+      return
+    }
+    try {
+      const result = await utils.client.qr.exportPng.query({ id: createdQrId, workspaceId, size: 800 })
+      const link = document.createElement("a")
+      link.download = `qr-${createdShortCode}.png`
+      link.href = `data:image/png;base64,${result.base64}`
+      link.click()
+      toast.success("QR code exporté en PNG")
+    } catch {
+      toast.error("Échec de l'export PNG")
+    }
+  }, [createdQrId, createdShortCode, workspaceId, utils])
+
+  const handleExportSvg = useCallback(async () => {
+    if (!createdQrId) {
+      toast.error("Créez d'abord un QR code")
+      return
+    }
+    try {
+      const result = await utils.client.qr.exportSvg.query({ id: createdQrId, workspaceId })
+      const link = document.createElement("a")
+      link.download = `qr-${createdShortCode}.svg`
+      link.href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(result.svg)}`
+      link.click()
+      toast.success("QR code exporté en SVG")
+    } catch {
+      toast.error("Échec de l'export SVG")
+    }
+  }, [createdQrId, createdShortCode, workspaceId, utils])
+
+  const handleExportPdf = useCallback(async () => {
+    if (!createdQrId) {
+      toast.error("Créez d'abord un QR code")
+      return
+    }
+    try {
+      const result = await utils.client.qr.exportPdf.query({ id: createdQrId, workspaceId })
+      const link = document.createElement("a")
+      link.download = `qr-${createdShortCode}.pdf`
+      link.href = `data:application/pdf;base64,${result.base64}`
+      link.click()
+      toast.success("QR code exporté en PDF")
+    } catch {
+      toast.error("Échec de l'export PDF")
+    }
+  }, [createdQrId, createdShortCode, workspaceId, utils])
 
   return (
     <div className="space-y-8">
@@ -136,6 +189,10 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
           qrData={qrData}
           loading={loading}
           onCreate={handleCreate}
+          canExport={createdQrId !== null}
+          onExportPng={handleExportPng}
+          onExportSvg={handleExportSvg}
+          onExportPdf={handleExportPdf}
         />
 
         <div className="space-y-4">

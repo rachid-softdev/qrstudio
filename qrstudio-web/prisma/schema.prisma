@@ -46,6 +46,8 @@ model User {
   name          String?
   image         String?
   passwordHash  String?
+  loginAttempts Int       @default(0)
+  lockoutUntil  DateTime?
   plan          Plan      @default(FREE)
   stripeCustomerId   String?  @unique
   stripeSubscriptionId String? @unique
@@ -57,8 +59,6 @@ model User {
   workspaces    WorkspaceMember[]
   ownedWorkspaces Workspace[]
   apiKeys       ApiKey[]
-
-  @@index([email])
 }
 
 model Account {
@@ -92,6 +92,7 @@ model Session {
 }
 
 model VerificationToken {
+  id         String   @id @default(cuid())
   identifier String
   token      String   @unique
   expires    DateTime
@@ -109,7 +110,7 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  owner     User              @relation(fields: [ownerId], references: [id])
+  owner     User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   members   WorkspaceMember[]
   qrCodes   QRCode[]
   invitations WorkspaceInvitation[]
@@ -144,7 +145,6 @@ model WorkspaceInvitation {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, email])
-  @@index([token])
 }
 
 // ─── QR Codes ────────────────────────────────────────────────────────────────
@@ -181,11 +181,11 @@ model QRCode {
 
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   scans       Scan[]
-  landingPage LandingPage? @relation(fields: [landingPageId], references: [id])
+  landingPage LandingPage? @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
-  @@index([shortCode])
   @@index([createdAt])
+  @@index([workspaceId, type, status])
 }
 
 model LandingPage {
@@ -224,6 +224,7 @@ model Scan {
   @@index([qrCodeId])
   @@index([qrCodeId, scannedAt])
   @@index([scannedAt])
+  @@index([qrCodeId, ipHash])
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
@@ -241,5 +242,14 @@ model ApiKey {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([keyHash])
+}
+
+// ─── Webhook Idempotency ─────────────────────────────────────────────────────
+
+model WebhookEvent {
+  id        String   @id
+  type      String
+  processedAt DateTime @default(now())
+
+  @@index([processedAt])
 }

@@ -3,27 +3,37 @@ import { prisma } from "@/server/db"
 import { PLAN_LIMITS } from "@/lib/constants"
 import { generateShortCode } from "@/lib/utils"
 import { generateQRSvg } from "@/lib/qr-generator"
-import type { Plan, QRType } from "@prisma/client"
+import type { Plan, QRStatus, QRType } from "@prisma/client"
 import type { QRCreateInput, QRUpdateInput } from "@/lib/validations"
 
 type PlanKey = keyof typeof PLAN_LIMITS
 
-function getDestinationUrl(type: QRType, input: QRCreateInput): string | null {
+/**
+ * Minimal input shape for QR data generation.
+ * Accepts both raw creation input and data mapped from a Prisma entity.
+ */
+export interface QRDataInput {
+  type: QRType | string
+  destinationUrl?: string | null
+  wifi?: { ssid?: string; password?: string; encryption?: string } | undefined
+  vcard?: { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string } | undefined
+  textContent?: string | null
+}
+
+export function getDestinationUrl(type: QRType, input: QRCreateInput): string | null {
   switch (type) {
     case 'URL':
+    case 'PDF':
       return input.destinationUrl ?? null
     case 'WHATSAPP': {
       const phone = input.destinationUrl ?? ''
+      // Stocker uniquement les chiffres pour compatibilité avec resolveDestination et prepareQRData
       return phone.replace(/[^0-9]/g, '')
     }
     case 'WIFI':
       return `${input.wifi?.ssid ?? ''}${input.wifi?.password ? ':' + input.wifi.password : ''}`
     case 'TEXT':
-      return null
     case 'VCARD':
-      return null
-    case 'PDF':
-      return input.destinationUrl ?? null
     case 'LANDING_PAGE':
       return null
   }
@@ -208,9 +218,59 @@ export const qrService = {
 
     return { id, svgContent }
   },
+
+  async updateStatus(id: string, workspaceId: string, status: QRStatus, userId: string): Promise<void> {
+    const existing = await prisma.qRCode.findFirst({
+      where: { id, workspaceId },
+    })
+    if (!existing) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
+    }
+
+    const member = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
+    })
+    if (!member || member.role === 'VIEWER') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Action non autorisée' })
+    }
+
+    // RÈGLE MÉTIER : FREE ne peut pas PAUSER
+    if (status === 'PAUSED') {
+      const workspaceOwner = await prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { owner: { select: { plan: true } } },
+      })
+      if (workspaceOwner?.owner.plan === 'FREE') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Les QR codes du plan Gratuit ne peuvent pas être mis en pause.',
+        })
+      }
+    }
+
+    await prisma.qRCode.update({
+      where: { id },
+      data: { status },
+    })
+  },
+
+  prepareQRDataFromEntity(
+    entity: {
+      type: string
+      destinationUrl: string | null
+      wifiSsid: string | null
+      wifiPassword: string | null
+      wifiEncryption: string | null
+      vcardJson: string | null
+      textContent: string | null
+      shortCode: string
+    },
+  ): string {
+    return prepareQRData(toQRDataInput(entity), entity.shortCode)
+  },
 }
 
-function prepareQRData(input: QRCreateInput, shortCode: string): string {
+export function prepareQRData(input: QRDataInput, shortCode: string): string {
   switch (input.type) {
     case 'URL':
       return input.destinationUrl ?? ''
@@ -230,6 +290,38 @@ function prepareQRData(input: QRCreateInput, shortCode: string): string {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
       return `${appUrl}/l/${shortCode}`
     }
+    default:
+      return ''
+  }
+}
+
+/**
+ * Converts a Prisma QRCode entity to QRDataInput and calls prepareQRData.
+ * Useful in routers where the entity fields are flat (wifiSsid, vcardJson, etc.).
+ */
+function toQRDataInput(
+  entity: {
+    type: string
+    destinationUrl: string | null
+    wifiSsid: string | null
+    wifiPassword: string | null
+    wifiEncryption: string | null
+    vcardJson: string | null
+    textContent: string | null
+  },
+): QRDataInput {
+  return {
+    type: entity.type as QRType,
+    destinationUrl: entity.destinationUrl ?? undefined,
+    wifi: entity.wifiSsid
+      ? {
+          ssid: entity.wifiSsid,
+          password: entity.wifiPassword ?? undefined,
+          encryption: (entity.wifiEncryption ?? 'nopass') as 'WPA' | 'WEP' | 'nopass',
+        }
+      : undefined,
+    vcard: entity.vcardJson ? JSON.parse(entity.vcardJson) : undefined,
+    textContent: entity.textContent ?? undefined,
   }
 }
 
