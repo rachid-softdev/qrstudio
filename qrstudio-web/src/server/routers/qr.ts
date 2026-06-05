@@ -194,6 +194,26 @@ export const qrRouter = router({
       return analyticsService.exportCSV(input.qrCodeId, input.period)
     }),
 
+  exportCsvPage: workspaceProcedure
+    .input(z.object({
+      qrCodeId: z.string(),
+      workspaceId: z.string(),
+      period: PeriodEnum.default('30d'),
+      cursor: z.string().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      await workspaceQuery(ctx, input.workspaceId)
+      const existing = await prisma.qRCode.findFirst({
+        where: { id: input.qrCodeId, workspaceId: input.workspaceId },
+      })
+
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
+      }
+
+      return analyticsService.exportCSVPage(input.qrCodeId, input.period, input.cursor)
+    }),
+
   exportSvg: workspaceProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .query(async ({ ctx, input }) => {

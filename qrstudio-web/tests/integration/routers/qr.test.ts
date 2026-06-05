@@ -16,6 +16,7 @@ const prismaMock = vi.hoisted(() => {
     scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count", "groupBy"]),
     landingPage: model(["findUnique", "findFirst", "create", "update"]),
     user: model(),
+    scanDaily: model(["findUnique", "findFirst", "findMany", "create", "update", "delete", "count", "groupBy"]),
     $queryRaw: vi.fn(),
   }
 })
@@ -26,6 +27,15 @@ vi.mock("@/lib/utils", () => ({ generateShortCode: vi.fn() }))
 vi.mock("@/lib/qr-generator", () => ({
   generateQRSvg: vi.fn().mockResolvedValue("<svg></svg>"),
   generateQrPngBuffer: vi.fn().mockResolvedValue(Buffer.from("")),
+}))
+// Mock cache layer so tests don't need Redis
+vi.mock("@/server/cache/analytics-cache", () => ({
+  readWithCache: vi.fn((_key: string, _ttl: number, compute: () => Promise<unknown>) => compute()),
+  invalidateAnalyticsCache: vi.fn(),
+  analyticsCacheKey: vi.fn((id: string, period: string) => `analytics:${id}:${period}`),
+  dashboardCacheKey: vi.fn((id: string) => `dashboard:${id}`),
+  ANALYTICS_TTL: 60,
+  DASHBOARD_TTL: 30,
 }))
 
 import { qrRouter } from "@/server/routers/qr"
@@ -420,6 +430,8 @@ describe("qrRouter", () => {
       prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 10, uniqueScans: 5 } as never)
       prismaMock.user.findUnique.mockResolvedValue({ plan: "PRO" } as never)
+      // ScanDaily returns empty → fallback to raw Scan queries
+      prismaMock.scanDaily.findMany.mockResolvedValue([])
       // $queryRaw retourne les scans (getScansByDay) puis pays/devices/os vides
       prismaMock.$queryRaw
         .mockResolvedValueOnce([{ date: "2024-06-01", count: BigInt(1) }])
@@ -449,6 +461,8 @@ describe("qrRouter", () => {
       prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 0, uniqueScans: 0 } as never)
       prismaMock.user.findUnique.mockResolvedValue({ plan: "FREE" } as never)
+      // ScanDaily returns empty → fallback to raw Scan queries
+      prismaMock.scanDaily.findMany.mockResolvedValue([])
       prismaMock.$queryRaw
         .mockResolvedValue([])
         .mockResolvedValue([])
@@ -459,6 +473,54 @@ describe("qrRouter", () => {
         qrCodeId: "qr-1", workspaceId: "ws-1",
       })
       expect(result.totalScans).toBe(0)
+    })
+  })
+
+  describe("exportCsvPage", () => {
+    it("should return first page with header row + data rows", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
+      prismaMock.scan.findMany.mockResolvedValue([
+        { scannedAt: new Date("2024-01-15T10:00:00Z"), ipHash: "abc123", country: "France", city: "Paris", deviceType: "mobile", os: "iOS", browser: "Safari", referer: "https://google.com" },
+      ] as never)
+
+      const caller = qrRouter.createCaller(authed())
+      const result = await caller.exportCsvPage({ qrCodeId: "qr-1", workspaceId: "ws-1", period: "30d" })
+
+      expect(result.rows).toHaveLength(2) // header + 1 data row
+      expect(result.rows[0]).toBe("Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent")
+      expect(result.rows[1]).toContain("France")
+    })
+
+    it("should return nextCursor when more data available (1000 rows)", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
+      const scans = Array.from({ length: 1000 }, (_, i) => ({
+        id: `scan-${i}`,
+        scannedAt: new Date("2024-01-15T10:00:00Z"),
+        ipHash: `ip${i}`, country: null, city: null, deviceType: null, os: null, browser: null, referer: null,
+      }))
+      prismaMock.scan.findMany.mockResolvedValue(scans as never)
+
+      const result = await qrRouter.createCaller(authed()).exportCsvPage({ qrCodeId: "qr-1", workspaceId: "ws-1", period: "30d" })
+
+      expect(result.rows).toHaveLength(1001)
+      expect(result.nextCursor).toBe("scan-999")
+    })
+
+    it("should throw NOT_FOUND if QR code does not exist", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrRouter.createCaller(authed()).exportCsvPage({
+        qrCodeId: "nonexistent", workspaceId: "ws-1", period: "30d",
+      })).rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should throw UNAUTHORIZED if not logged in", async () => {
+      const caller = qrRouter.createCaller(ctx())
+      await expect(caller.exportCsvPage({ qrCodeId: "qr-1", workspaceId: "ws-1", period: "30d" }))
+        .rejects.toMatchObject({ code: "UNAUTHORIZED" })
     })
   })
 })

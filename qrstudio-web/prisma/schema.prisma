@@ -181,6 +181,7 @@ model QRCode {
 
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   scans       Scan[]
+  scanDaily   ScanDaily[]
   landingPage LandingPage? @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
@@ -227,6 +228,38 @@ model Scan {
   @@index([qrCodeId, scannedAt])
   @@index([scannedAt])
   @@index([qrCodeId, ipHash])
+}
+
+// ─── Analytics — Summary ──────────────────────────────────────────────────────
+// ScanDaily: one row per QR code per day. Pre-aggregated analytics for fast reads.
+// Populated by the aggregation worker (PgBoss, every 60s).
+model ScanDaily {
+  id         String   @id @default(cuid())
+  qrCodeId   String
+  date       DateTime @db.Date
+  totalScans Int      @default(0)
+  uniqueIps  Int      @default(0)
+
+  byCountry Json? @db.JsonB
+  byDevice  Json? @db.JsonB
+  byOs      Json? @db.JsonB
+  byBrowser Json? @db.JsonB
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  @@unique([qrCodeId, date])
+  @@index([qrCodeId, date])
+  @@index([date])
+  @@index([qrCodeId])
+}
+
+// AggregationWatermark: tracks the last scannedAt timestamp processed by a worker.
+// Enables idempotent incremental aggregation.
+model AggregationWatermark {
+  id              String   @id @default(cuid())
+  queueName       String   @unique
+  lastProcessedAt DateTime
+  updatedAt       DateTime @updatedAt
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────

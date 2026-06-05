@@ -12,4 +12,6 @@ export async function getQueue(): Promise<PgBoss> {
 
 export const QUEUE_NAMES = {
   RECORD_SCAN: "record-scan",
+  AGGREGATE_SCANS: "aggregate-scans",
+  RETENTION_CLEANUP: "retention-cleanup",
 } as const
