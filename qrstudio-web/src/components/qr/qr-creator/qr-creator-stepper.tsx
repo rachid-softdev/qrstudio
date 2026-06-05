@@ -32,6 +32,10 @@ interface QRCreatorStepperProps {
   qrData: string
   loading: boolean
   onCreate: () => Promise<void>
+  canExport: boolean
+  onExportPng?: () => void
+  onExportSvg?: () => void
+  onExportPdf?: () => void
 }
 
 function canGoNext(
@@ -77,6 +81,10 @@ export function QRCreatorStepper({
   qrData,
   loading,
   onCreate,
+  canExport,
+  onExportPng,
+  onExportSvg,
+  onExportPdf,
 }: QRCreatorStepperProps) {
   const goNext = useCallback(() => {
     onStepChange((s) => Math.min(4, s + 1))
@@ -129,8 +137,11 @@ export function QRCreatorStepper({
             qrName={qrName}
             onNameChange={onQrNameChange}
             onCreate={onCreate}
-            canExport={!!(qrName.trim() && qrData)}
+            canExport={canExport}
             loading={loading}
+            onExportPng={onExportPng}
+            onExportSvg={onExportSvg}
+            onExportPdf={onExportPdf}
           />
         </div>
       )}

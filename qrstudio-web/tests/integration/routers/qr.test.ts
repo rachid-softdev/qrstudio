@@ -16,6 +16,7 @@ const prismaMock = vi.hoisted(() => {
     scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count", "groupBy"]),
     landingPage: model(["findUnique", "findFirst", "create", "update"]),
     user: model(),
+    $queryRaw: vi.fn(),
   }
 })
 
@@ -77,22 +78,263 @@ describe("qrRouter", () => {
   })
 
   describe("list", () => {
-    it("should return paginated QR codes", async () => {
+    it("should return paginated QR codes with default limit", async () => {
       mockWorkspaceAccess()
-      prismaMock.qRCode.findMany.mockResolvedValue([
-        { id: "qr-1", shortCode: "a1", name: "QR 1", type: "URL", status: "ACTIVE", totalScans: 0, lastScannedAt: null, createdAt: new Date() },
-      ] as never)
+      const items = Array.from({ length: 20 }, (_, i) => ({
+        id: `qr-${i}`, shortCode: `sc${i}`, name: `QR ${i}`,
+        type: "URL", status: "ACTIVE", totalScans: 0, lastScannedAt: null, createdAt: new Date(),
+      }))
+      prismaMock.qRCode.findMany.mockResolvedValue(items as never)
+
+      const result = await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1" })
+      expect(result.items).toHaveLength(20)
+      expect(result.nextCursor).toBeUndefined()
+    })
+
+    it("should support cursor-based pagination with nextCursor", async () => {
+      mockWorkspaceAccess()
+      const items = Array.from({ length: 21 }, (_, i) => ({
+        id: `qr-${i}`, shortCode: `sc${i}`, name: `QR ${i}`,
+        type: "URL", status: "ACTIVE", totalScans: i, lastScannedAt: null, createdAt: new Date(),
+      }))
+      prismaMock.qRCode.findMany.mockResolvedValue(items as never)
 
       const result = await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1", limit: 20 })
+      expect(result.items).toHaveLength(20)
+      expect(result.nextCursor).toBeDefined()
+      expect(result.nextCursor).toBe("qr-20")
+    })
+
+    it("should filter by type", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([
+        { id: "qr-wa", shortCode: "wa1", name: "WA QR", type: "WHATSAPP", status: "ACTIVE", totalScans: 0, lastScannedAt: null, createdAt: new Date() },
+      ] as never)
+
+      const result = await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1", type: "WHATSAPP" })
       expect(result.items).toHaveLength(1)
+      expect(result.items[0]!.type).toBe("WHATSAPP")
+      // Verify the where clause includes type filter
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.type).toBe("WHATSAPP")
+    })
+
+    it("should filter by status", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([
+        { id: "qr-p", shortCode: "p1", name: "Paused QR", type: "URL", status: "PAUSED", totalScans: 0, lastScannedAt: null, createdAt: new Date() },
+      ] as never)
+
+      const result = await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1", status: "PAUSED" })
+      expect(result.items[0]!.status).toBe("PAUSED")
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.status).toBe("PAUSED")
+    })
+
+    it("should search by name or shortCode (case-insensitive)", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([
+        { id: "qr-s", shortCode: "findme", name: "Searchable QR", type: "URL", status: "ACTIVE", totalScans: 0, lastScannedAt: null, createdAt: new Date() },
+      ] as never)
+
+      const result = await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1", search: "findme" })
+      expect(result.items).toHaveLength(1)
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.OR).toBeDefined()
+      expect(findManyCall.where.OR).toHaveLength(2)
+      expect(findManyCall.where.OR[0].name.contains).toBe("findme")
+      expect(findManyCall.where.OR[1].shortCode.contains).toBe("findme")
+    })
+
+    it("should combine type, status, and search filters", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([] as never)
+
+      await qrRouter.createCaller(authed()).list({
+        workspaceId: "ws-1", type: "URL", status: "ACTIVE", search: "test",
+      })
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.type).toBe("URL")
+      expect(findManyCall.where.status).toBe("ACTIVE")
+      expect(findManyCall.where.OR).toBeDefined()
+    })
+
+    it("should enforce workspaceId filter to prevent cross-workspace leaks", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([] as never)
+
+      await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1" })
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.workspaceId).toBe("ws-1")
+    })
+
+    it("should throw UNAUTHORIZED if not logged in", async () => {
+      const caller = qrRouter.createCaller(ctx())
+      await expect(caller.list({ workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "UNAUTHORIZED" })
+    })
+
+    it("should throw FORBIDDEN if user not in workspace", async () => {
+      prismaMock.workspaceMember.findUnique.mockResolvedValue(null)
+
+      await expect(qrRouter.createCaller(authed("user-other")).list({ workspaceId: "ws-other" }))
+        .rejects.toMatchObject({ code: "FORBIDDEN" })
     })
   })
 
   describe("getById", () => {
-    it("should throw NOT_FOUND if QR code in wrong workspace", async () => {
+    it("should return QR code by id when found in workspace", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-1", workspaceId: "ws-1", shortCode: "abc123", name: "My QR",
+        type: "URL", status: "ACTIVE", destinationUrl: "https://ex.com",
+        fgColor: "#000", bgColor: "#FFF", moduleShape: "square",
+        logoUrl: null, frameType: null, frameLabel: null,
+        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
+        vcardJson: null, textContent: null, landingPageId: null,
+        landingPage: null, totalScans: 0, uniqueScans: 0,
+        lastScannedAt: null, createdAt: new Date(), updatedAt: new Date(),
+      } as never)
+
+      const result = await qrRouter.createCaller(authed()).getById({ id: "qr-1", workspaceId: "ws-1" })
+      expect(result.id).toBe("qr-1")
+      expect(result.name).toBe("My QR")
+    })
+
+    it("should throw NOT_FOUND if QR code not in workspace (IDOR protection)", async () => {
+      mockWorkspaceAccess()
+      // QR code exists but belongs to different workspace
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrRouter.createCaller(authed()).getById({ id: "qr-other", workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should throw NOT_FOUND for non-existent QR code", async () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue(null)
-      await expect(qrRouter.createCaller(authed()).getById({ id: "qr-1", workspaceId: "ws-1" }))
+
+      await expect(qrRouter.createCaller(authed()).getById({ id: "nonexistent", workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should throw UNAUTHORIZED if not logged in", async () => {
+      const caller = qrRouter.createCaller(ctx())
+      await expect(caller.getById({ id: "qr-1", workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "UNAUTHORIZED" })
+    })
+
+    it("should include landingPage when type is LANDING_PAGE", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-lp", workspaceId: "ws-1", shortCode: "lp1", name: "LP QR",
+        type: "LANDING_PAGE", status: "ACTIVE",
+        destinationUrl: null, fgColor: "#000", bgColor: "#FFF", moduleShape: "square",
+        logoUrl: null, frameType: null, frameLabel: null,
+        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
+        vcardJson: null, textContent: null, landingPageId: "lp-1",
+        landingPage: { id: "lp-1", title: "Welcome", description: "LP desc" },
+        totalScans: 0, uniqueScans: 0,
+        lastScannedAt: null, createdAt: new Date(), updatedAt: new Date(),
+      } as never)
+
+      const result = await qrRouter.createCaller(authed()).getById({ id: "qr-lp", workspaceId: "ws-1" })
+      expect(result.landingPage).toBeDefined()
+      expect(result.landingPage!.title).toBe("Welcome")
+    })
+  })
+
+  describe("exportSvg", () => {
+    it("should export SVG for a valid URL QR code", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-1", workspaceId: "ws-1", shortCode: "abc123",
+        type: "URL", status: "ACTIVE", destinationUrl: "https://ex.com",
+        fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
+        logoUrl: null, frameType: null, frameLabel: null,
+        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
+        vcardJson: null, textContent: null, landingPageId: null,
+      } as never)
+
+      const result = await qrRouter.createCaller(authed()).exportSvg({ id: "qr-1", workspaceId: "ws-1" })
+      expect(result.svg).toBe("<svg></svg>")
+    })
+
+    it("should export SVG for WIFI type QR (covers toQRDataInput wifi branch)", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-wifi", workspaceId: "ws-1", shortCode: "wifisc",
+        type: "WIFI", status: "ACTIVE", destinationUrl: null,
+        fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
+        logoUrl: null, frameType: null, frameLabel: null,
+        wifiSsid: "HomeNet", wifiPassword: "secret", wifiEncryption: "WPA",
+        vcardJson: null, textContent: null, landingPageId: null,
+      } as never)
+
+      const result = await qrRouter.createCaller(authed()).exportSvg({ id: "qr-wifi", workspaceId: "ws-1" })
+      expect(result.svg).toBe("<svg></svg>")
+    })
+
+    it("should export SVG for VCARD type (covers toQRDataInput vcard branch)", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-vc", workspaceId: "ws-1", shortCode: "vc123",
+        type: "VCARD", status: "ACTIVE", destinationUrl: null,
+        fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
+        logoUrl: null, frameType: null, frameLabel: null,
+        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
+        vcardJson: JSON.stringify({ firstName: "John", lastName: "Doe" }),
+        textContent: null, landingPageId: null,
+      } as never)
+
+      const result = await qrRouter.createCaller(authed()).exportSvg({ id: "qr-vc", workspaceId: "ws-1" })
+      expect(result.svg).toBe("<svg></svg>")
+    })
+
+    it("should throw NOT_FOUND if QR code does not exist for SVG export", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+      await expect(qrRouter.createCaller(authed()).exportSvg({ id: "nonexistent", workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+  })
+
+  describe("exportPng", () => {
+    it("should export PNG as base64 for a valid URL QR code", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-1", workspaceId: "ws-1", shortCode: "abc123",
+        type: "URL", status: "ACTIVE", destinationUrl: "https://ex.com",
+        fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
+        logoUrl: null, frameType: null, frameLabel: null,
+        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
+        vcardJson: null, textContent: null, landingPageId: null,
+      } as never)
+
+      const result = await qrRouter.createCaller(authed()).exportPng({ id: "qr-1", workspaceId: "ws-1", size: 800 })
+      expect(result.base64).toBeDefined()
+      expect(typeof result.base64).toBe("string")
+    })
+
+    it("should export PNG for WIFI type (covers toQRDataInput wifi branch via PNG)", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-wifi-png", workspaceId: "ws-1", shortCode: "wifip",
+        type: "WIFI", status: "ACTIVE", destinationUrl: null,
+        fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
+        logoUrl: null, frameType: null, frameLabel: null,
+        wifiSsid: "GuestNet", wifiPassword: "pass", wifiEncryption: "WPA",
+        vcardJson: null, textContent: null, landingPageId: null,
+      } as never)
+
+      const result = await qrRouter.createCaller(authed()).exportPng({ id: "qr-wifi-png", workspaceId: "ws-1" })
+      expect(result.base64).toBeDefined()
+    })
+
+    it("should throw NOT_FOUND if QR code does not exist for PNG export", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+      await expect(qrRouter.createCaller(authed()).exportPng({ id: "nonexistent", workspaceId: "ws-1" }))
         .rejects.toMatchObject({ code: "NOT_FOUND" })
     })
   })
@@ -143,10 +385,11 @@ describe("qrRouter", () => {
     it("should change status from ACTIVE to PAUSED", async () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
+      prismaMock.workspace.findUnique.mockResolvedValue({ owner: { plan: "PRO" } } as never)
       prismaMock.qRCode.update.mockResolvedValue({ id: "qr-1", status: "PAUSED" } as never)
 
       const result = await qrRouter.createCaller(authed()).updateStatus({ id: "qr-1", workspaceId: "ws-1", status: "PAUSED" })
-      expect(result.status).toBe("PAUSED")
+      expect(result).toEqual({ success: true })
     })
   })
 
@@ -176,10 +419,13 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 10, uniqueScans: 5 } as never)
-      prismaMock.scan.findMany.mockResolvedValue([
-        { scannedAt: new Date("2024-06-01T10:00:00Z") },
-      ] as never)
-      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+      prismaMock.user.findUnique.mockResolvedValue({ plan: "PRO" } as never)
+      // $queryRaw retourne les scans (getScansByDay) puis pays/devices/os vides
+      prismaMock.$queryRaw
+        .mockResolvedValueOnce([{ date: "2024-06-01", count: BigInt(1) }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
 
       const result = await qrRouter.createCaller(authed()).getAnalytics({
         qrCodeId: "qr-1", workspaceId: "ws-1", period: "7d",
@@ -202,8 +448,12 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 0, uniqueScans: 0 } as never)
-      prismaMock.scan.findMany.mockResolvedValue([] as never)
-      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+      prismaMock.user.findUnique.mockResolvedValue({ plan: "FREE" } as never)
+      prismaMock.$queryRaw
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
 
       const result = await qrRouter.createCaller(authed()).getAnalytics({
         qrCodeId: "qr-1", workspaceId: "ws-1",

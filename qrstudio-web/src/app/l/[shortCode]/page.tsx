@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation"
 import { prisma } from "@/server/db"
+import { getQueue, QUEUE_NAMES } from "@/server/queue"
+import { headers } from "next/headers"
 import type { Metadata } from "next"
 
 interface Props {
@@ -45,6 +47,25 @@ export default async function LandingPageView({ params }: Props) {
   if (!qrCode || !qrCode.landingPage) {
     notFound()
   }
+
+  // Enregistrer le scan de manière asynchrone via la file d'attente
+  const headersList = await headers()
+  const ip = headersList.get("x-forwarded-for") ?? headersList.get("x-real-ip") ?? undefined
+  const userAgent = headersList.get("user-agent") ?? undefined
+  const referer = headersList.get("referer") ?? undefined
+
+  getQueue()
+    .then((queue) =>
+      queue.send(QUEUE_NAMES.RECORD_SCAN, {
+        qrCodeId: qrCode.id,
+        ip,
+        userAgent,
+        referer,
+      })
+    )
+    .catch(() => {
+      /* fire-and-forget */
+    })
 
   const lp = qrCode.landingPage
 

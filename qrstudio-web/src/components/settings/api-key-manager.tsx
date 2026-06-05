@@ -6,10 +6,7 @@ import { KeyIcon, Trash2Icon, PlusIcon, Loader2Icon } from "lucide-react"
 import { api } from "@/lib/trpc/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+
 import {
   Table,
   TableHeader,
@@ -95,25 +92,24 @@ export function ApiKeyManager() {
           <p className="text-sm text-muted-foreground">
             Les clés API permettent d&apos;intégrer QR Studio à vos outils.
           </p>
-          <Dialog open={showGenerate} onOpenChange={setShowGenerate}>
-            <DialogTrigger>
-              <Button size="sm">
-                <PlusIcon className="size-4" />
-                Nouvelle clé
-              </Button>
-            </DialogTrigger>
-            <ApiKeyModal
-              open={showGenerate}
-              onOpenChange={setShowGenerate}
-              newKey={newKey}
-              keyName={keyName}
-              onKeyNameChange={setKeyName}
-              onGenerate={handleGenerate}
-              onCopy={handleCopy}
-              onClose={handleCloseDialog}
-              isPending={generateMutation.isPending}
-            />
-          </Dialog>
+          <Button
+            size="sm"
+            onClick={() => setShowGenerate(true)}
+          >
+            <PlusIcon className="size-4" />
+            Nouvelle clé
+          </Button>
+          <ApiKeyModal
+            open={showGenerate}
+            onOpenChange={setShowGenerate}
+            newKey={newKey}
+            keyName={keyName}
+            onKeyNameChange={setKeyName}
+            onGenerate={handleGenerate}
+            onCopy={handleCopy}
+            onClose={handleCloseDialog}
+            isPending={generateMutation.isPending}
+          />
         </div>
 
         {keys && keys.length > 0 ? (

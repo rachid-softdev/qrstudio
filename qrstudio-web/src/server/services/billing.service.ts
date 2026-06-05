@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server"
 import { prisma } from "@/server/db"
 import * as Sentry from "@sentry/nextjs"
 import type { Plan } from "@/types/index"
+import { hasEventBeenProcessed, markEventProcessed } from "./stripe-idempotency"
 
 function getStripe(): Stripe {
   const secretKey = process.env.STRIPE_SECRET_KEY
@@ -147,6 +148,11 @@ export const billingService = {
   },
 
   async handleWebhookEvent(event: Stripe.Event) {
+    // Idempotency check
+    if (await hasEventBeenProcessed(event.id)) {
+      return { skipped: true }
+    }
+
     try {
       switch (event.type) {
         case "checkout.session.completed": {
@@ -168,7 +174,7 @@ export const billingService = {
 
         case "customer.subscription.updated": {
           const subscription = event.data.object as Stripe.Subscription
-          const userId = subscription.metadata?.userId
+          let userId = subscription.metadata?.userId
 
           if (!userId) {
             const user = await prisma.user.findFirst({
@@ -176,13 +182,14 @@ export const billingService = {
               select: { id: true },
             })
             if (!user) break
-
-            const plan = mapStripePlanToPlan(subscription.items.data[0]?.price.id ?? "")
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { plan },
-            })
+            userId = user.id
           }
+
+          const plan = mapStripePlanToPlan(subscription.items.data[0]?.price.id ?? "")
+          await prisma.user.update({
+            where: { id: userId },
+            data: { plan },
+          })
           break
         }
 
@@ -205,6 +212,8 @@ export const billingService = {
           break
         }
       }
+
+      await markEventProcessed(event.id, event.type)
     } catch (error) {
       Sentry.captureException(error)
       throw error

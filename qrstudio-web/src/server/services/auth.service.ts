@@ -5,7 +5,63 @@ import Stripe from "stripe"
 import { prisma } from "@/server/db"
 import { emailService } from "@/server/services/email.service"
 
+const MAX_LOGIN_ATTEMPTS = 5
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000 // 15 minutes
+
 export const authService = {
+  async checkLockout(email: string): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { loginAttempts: true, lockoutUntil: true },
+    })
+    if (!user) return
+    if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+      const remaining = Math.ceil(
+        (user.lockoutUntil.getTime() - Date.now()) / 1000 / 60
+      )
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message: `Compte verrouillé. Réessayez dans ${remaining} minute(s).`,
+      })
+    }
+    if (user.lockoutUntil && user.lockoutUntil <= new Date()) {
+      await prisma.user.update({
+        where: { email },
+        data: { loginAttempts: 0, lockoutUntil: null },
+      })
+    }
+  },
+
+  async recordFailedAttempt(email: string): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { loginAttempts: true },
+    })
+    if (!user) return
+    const newAttempts = user.loginAttempts + 1
+    if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+      await prisma.user.update({
+        where: { email },
+        data: {
+          loginAttempts: newAttempts,
+          lockoutUntil: new Date(Date.now() + LOCKOUT_DURATION_MS),
+        },
+      })
+    } else {
+      await prisma.user.update({
+        where: { email },
+        data: { loginAttempts: newAttempts },
+      })
+    }
+  },
+
+  async resetLoginAttempts(email: string): Promise<void> {
+    await prisma.user.update({
+      where: { email },
+      data: { loginAttempts: 0, lockoutUntil: null },
+    })
+  },
+
   async register(data: { name: string; email: string; password: string }) {
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email },

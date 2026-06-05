@@ -12,6 +12,7 @@ const prismaMock = vi.hoisted(() => {
     qRCode: model(),
     scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count", "groupBy"]),
     workspaceMember: model(),
+    $queryRaw: vi.fn(),
   }
 })
 
@@ -89,13 +90,12 @@ describe("analyticsService", () => {
   describe("getAnalytics", () => {
     it("should return analytics for 7d period", async () => {
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 10, uniqueScans: 5 } as never)
-      prismaMock.scan.findMany.mockResolvedValue([
-        { scannedAt: new Date("2024-01-15T10:00:00Z") },
-        { scannedAt: new Date("2024-01-15T12:00:00Z") },
-      ] as never)
-      prismaMock.scan.groupBy.mockResolvedValue([
-        { country: "France", _count: 2 },
-      ] as never)
+      // $queryRaw est appelé 4x dans Promise.all : getScansByDay, getTopCountries, getTopDevices, getTopOs
+      prismaMock.$queryRaw
+        .mockResolvedValueOnce([{ date: "2024-01-15", count: BigInt(2) }])
+        .mockResolvedValueOnce([{ country: "France", count: BigInt(2) }])
+        .mockResolvedValueOnce([{ device: "desktop", count: BigInt(2) }])
+        .mockResolvedValueOnce([{ os: "Windows", count: BigInt(2) }])
 
       const result = await analyticsService.getAnalytics("qr-1", "7d")
 
@@ -112,8 +112,11 @@ describe("analyticsService", () => {
 
     it("should return analytics for 30d period", async () => {
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 20, uniqueScans: 8 } as never)
-      prismaMock.scan.findMany.mockResolvedValue([] as never)
-      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+      prismaMock.$queryRaw
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
 
       const result = await analyticsService.getAnalytics("qr-1", "30d")
 
@@ -124,8 +127,11 @@ describe("analyticsService", () => {
 
     it("should return analytics for 90d period", async () => {
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 50, uniqueScans: 25 } as never)
-      prismaMock.scan.findMany.mockResolvedValue([] as never)
-      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+      prismaMock.$queryRaw
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
 
       const result = await analyticsService.getAnalytics("qr-1", "90d")
       expect(result.totalScans).toBe(50)
@@ -133,8 +139,11 @@ describe("analyticsService", () => {
 
     it("should return analytics for 'all' period (no date filter)", async () => {
       prismaMock.qRCode.findUnique.mockResolvedValue({ totalScans: 100, uniqueScans: 40 } as never)
-      prismaMock.scan.findMany.mockResolvedValue([] as never)
-      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+      prismaMock.$queryRaw
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
 
       const result = await analyticsService.getAnalytics("qr-1", "all")
       expect(result.totalScans).toBe(100)
@@ -142,8 +151,11 @@ describe("analyticsService", () => {
 
     it("should return zero values when qrCode is null", async () => {
       prismaMock.qRCode.findUnique.mockResolvedValue(null)
-      prismaMock.scan.findMany.mockResolvedValue([] as never)
-      prismaMock.scan.groupBy.mockResolvedValue([] as never)
+      prismaMock.$queryRaw
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
+        .mockResolvedValue([])
 
       const result = await analyticsService.getAnalytics("nonexistent", "7d")
       expect(result.totalScans).toBe(0)
@@ -171,11 +183,11 @@ describe("analyticsService", () => {
         ] as never)
       prismaMock.scan.count.mockResolvedValue(3)
       prismaMock.workspaceMember.count.mockResolvedValue(2)
-      prismaMock.scan.findMany.mockResolvedValue([
-        { scannedAt: new Date("2024-05-26T10:00:00Z") },
-        { scannedAt: new Date("2024-05-27T10:00:00Z") },
-        { scannedAt: new Date("2024-05-27T12:00:00Z") },
-      ] as never)
+      // $queryRaw retourne les scans groupés par date pour les 7 derniers jours
+      prismaMock.$queryRaw.mockResolvedValue([
+        { date: "2024-05-26", count: BigInt(1) },
+        { date: "2024-05-27", count: BigInt(2) },
+      ])
 
       const result = await analyticsService.getDashboardStats("ws-1")
 
@@ -197,7 +209,7 @@ describe("analyticsService", () => {
       prismaMock.qRCode.findMany.mockResolvedValue([] as never)
       prismaMock.scan.count.mockResolvedValue(0)
       prismaMock.workspaceMember.count.mockResolvedValue(0)
-      prismaMock.scan.findMany.mockResolvedValue([] as never)
+      prismaMock.$queryRaw.mockResolvedValue([])
 
       const result = await analyticsService.getDashboardStats("ws-empty")
       expect(result.totalMembers).toBe(1)

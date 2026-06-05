@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db"
+import { Prisma } from "@prisma/client"
 import { getCountry } from "@/lib/geo"
 import { parseDevice, parseOs, parseBrowser } from "@/lib/user-agent"
 import { createHash } from "crypto"
@@ -83,32 +84,37 @@ export const analyticsService = {
     }
   },
 
-  async getAnalytics(qrCodeId: string, period: '7d' | '30d' | '90d' | 'all') {
+  async getAnalytics(qrCodeId: string, period: '7d' | '30d' | '90d' | 'all', retentionDays?: number) {
     const qrCode = await prisma.qRCode.findUnique({
       where: { id: qrCodeId },
       select: { totalScans: true, uniqueScans: true },
     })
 
-    const sinceDate = getPeriodDate(period)
+    let effectiveSinceDate = getPeriodDate(period)
 
-    const whereClause = sinceDate
-      ? { qrCodeId, scannedAt: { gte: sinceDate } }
-      : { qrCodeId }
+    // Appliquer la rétention selon le plan
+    if (retentionDays && retentionDays !== Infinity) {
+      const retentionDate = new Date()
+      retentionDate.setDate(retentionDate.getDate() - retentionDays)
+      if (!effectiveSinceDate || effectiveSinceDate < retentionDate) {
+        effectiveSinceDate = retentionDate
+      }
+    }
 
     const [scansByDay, countryRaw, deviceRaw, osRaw] = await Promise.all([
-      getScansByDay(qrCodeId, sinceDate),
-      getGroupedCounts('country', whereClause),
-      getGroupedCounts('deviceType', whereClause),
-      getGroupedCounts('os', whereClause),
+      getScansByDay(qrCodeId, effectiveSinceDate),
+      getTopCountries(qrCodeId, effectiveSinceDate),
+      getTopDevices(qrCodeId, effectiveSinceDate),
+      getTopOs(qrCodeId, effectiveSinceDate),
     ])
 
     return {
       totalScans: qrCode?.totalScans ?? 0,
       uniqueScans: qrCode?.uniqueScans ?? 0,
       scansByDay,
-      byCountry: mapCountryData(countryRaw),
-      byDevice: mapDeviceData(deviceRaw),
-      byOs: mapOsData(osRaw),
+      byCountry: countryRaw.map((r) => ({ country: r.country, scans: Number(r.count) })),
+      byDevice: deviceRaw.map((r) => ({ device: r.device, scans: Number(r.count) })),
+      byOs: osRaw.map((r) => ({ os: r.os, scans: Number(r.count) })),
     }
   },
 
@@ -119,7 +125,22 @@ export const analyticsService = {
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 
-    const [totalQRCodes, recentQRCodes, scansToday, topQRCodes, totalMembers, scansLast7DaysRaw] = await Promise.all([
+    const scansLast7DaysRaw = await prisma.$queryRaw<
+      Array<{ date: string; count: bigint }>
+    >`
+      SELECT
+        DATE(scanned_at) as date,
+        COUNT(*)::int as count
+      FROM "Scan"
+      WHERE "qrCodeId" IN (
+        SELECT id FROM "QRCode" WHERE "workspaceId" = ${workspaceId}
+      )
+        AND scanned_at >= ${sevenDaysAgo}
+      GROUP BY DATE(scanned_at)
+      ORDER BY date ASC
+    `
+
+    const [totalQRCodes, recentQRCodes, scansToday, topQRCodes, totalMembers] = await Promise.all([
       prisma.qRCode.count({ where: { workspaceId } }),
       prisma.qRCode.findMany({
         where: { workspaceId },
@@ -144,27 +165,14 @@ export const analyticsService = {
         },
       }),
       prisma.workspaceMember.count({ where: { workspaceId } }),
-      prisma.scan.findMany({
-        where: {
-          qrCode: { workspaceId },
-          scannedAt: { gte: sevenDaysAgo },
-        },
-        select: { scannedAt: true },
-        orderBy: { scannedAt: 'asc' },
-      }),
     ])
-
-    const scansLast7DaysMap = new Map<string, number>()
-    for (const scan of scansLast7DaysRaw) {
-      const key = scan.scannedAt.toISOString().split('T')[0]
-      scansLast7DaysMap.set(key, (scansLast7DaysMap.get(key) ?? 0) + 1)
-    }
 
     const scansLast7Days = Array.from({ length: 7 }, (_, i) => {
       const date = new Date(sevenDaysAgo)
       date.setDate(date.getDate() + i + 1)
       const key = date.toISOString().split('T')[0]
-      return { date: key, scans: scansLast7DaysMap.get(key) ?? 0 }
+      const match = scansLast7DaysRaw.find((r) => r.date === key)
+      return { date: key, scans: match ? Number(match.count) : 0 }
     })
 
     return {
@@ -208,57 +216,73 @@ export const analyticsService = {
   },
 }
 
-async function getScansByDay(qrCodeId: string, sinceDate: Date | null) {
-  const scans = await prisma.scan.findMany({
-    where: sinceDate
-      ? { qrCodeId, scannedAt: { gte: sinceDate } }
-      : { qrCodeId },
-    select: { scannedAt: true },
-    orderBy: { scannedAt: 'asc' },
-  })
+async function getScansByDay(
+  qrCodeId: string,
+  sinceDate: Date | null
+): Promise<{ date: string; scans: number }[]> {
+  const whereClause = sinceDate
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate}`
+    : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId}`
 
-  const dayMap = new Map<string, number>()
-  for (const scan of scans) {
-    const key = scan.scannedAt.toISOString().split('T')[0]
-    dayMap.set(key, (dayMap.get(key) ?? 0) + 1)
-  }
+  const results = await prisma.$queryRaw<
+    Array<{ date: string; count: bigint }>
+  >`
+    SELECT
+      DATE(scanned_at) as date,
+      COUNT(*)::int as count
+    FROM "Scan"
+    ${whereClause}
+    GROUP BY DATE(scanned_at)
+    ORDER BY date ASC
+  `
 
-  return Array.from(dayMap.entries()).map(([date, scans]) => ({
-    date,
-    scans,
+  return results.map((r) => ({
+    date: r.date,
+    scans: Number(r.count),
   }))
 }
 
-type GroupedResult = { country?: string; deviceType?: string; os?: string; _count: number }
+async function getTopCountries(qrCodeId: string, sinceDate: Date | null) {
+  const whereClause = sinceDate
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate} AND country IS NOT NULL`
+    : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND country IS NOT NULL`
 
-async function getGroupedCounts(
-  field: 'country' | 'deviceType' | 'os',
-  whereClause: object
-): Promise<{ label: string; scans: number }[]> {
-  const results = await (prisma.scan as unknown as {
-    groupBy: (args: { by: string[]; where: object; _count: boolean; orderBy: { _count: string }; take: number }) => Promise<GroupedResult[]>
-  }).groupBy({
-    by: [field],
-    where: whereClause,
-    _count: true,
-    orderBy: { _count: 'desc' },
-    take: 10,
-  })
-
-  return results.map((r: GroupedResult) => ({
-    label: r[field] ?? 'Inconnu',
-    scans: r._count,
-  }))
+  return prisma.$queryRaw<Array<{ country: string; count: bigint }>>`
+    SELECT country, COUNT(*)::int as count
+    FROM "Scan"
+    ${whereClause}
+    GROUP BY country
+    ORDER BY count DESC
+    LIMIT 10
+  `
 }
 
-function mapCountryData(items: { label: string; scans: number }[]): { country: string; scans: number }[] {
-  return items.map((i) => ({ country: i.label, scans: i.scans }))
+async function getTopDevices(qrCodeId: string, sinceDate: Date | null) {
+  const whereClause = sinceDate
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate} AND "deviceType" IS NOT NULL`
+    : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND "deviceType" IS NOT NULL`
+
+  return prisma.$queryRaw<Array<{ device: string; count: bigint }>>`
+    SELECT "deviceType" as device, COUNT(*)::int as count
+    FROM "Scan"
+    ${whereClause}
+    GROUP BY "deviceType"
+    ORDER BY count DESC
+    LIMIT 10
+  `
 }
 
-function mapDeviceData(items: { label: string; scans: number }[]): { device: string; scans: number }[] {
-  return items.map((i) => ({ device: i.label, scans: i.scans }))
-}
+async function getTopOs(qrCodeId: string, sinceDate: Date | null) {
+  const whereClause = sinceDate
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate} AND os IS NOT NULL`
+    : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND os IS NOT NULL`
 
-function mapOsData(items: { label: string; scans: number }[]): { os: string; scans: number }[] {
-  return items.map((i) => ({ os: i.label, scans: i.scans }))
+  return prisma.$queryRaw<Array<{ os: string; count: bigint }>>`
+    SELECT os, COUNT(*)::int as count
+    FROM "Scan"
+    ${whereClause}
+    GROUP BY os
+    ORDER BY count DESC
+    LIMIT 10
+  `
 }
