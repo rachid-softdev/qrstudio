@@ -41,9 +41,9 @@ enum QRStatus {
 
 model User {
   id            String    @id @default(cuid())
-  email         String    @unique
+  email         String    @unique @db.VarChar(255)
   emailVerified DateTime?
-  name          String?
+  name          String?   @db.VarChar(100)
   image         String?
   passwordHash  String?
   loginAttempts Int       @default(0)
@@ -152,15 +152,15 @@ model WorkspaceInvitation {
 model QRCode {
   id          String   @id @default(cuid())
   workspaceId String
-  shortCode   String   @unique
-  name        String
+  shortCode   String   @unique @db.VarChar(10)
+  name        String   @db.VarChar(100)
   type        QRType
   status      QRStatus @default(ACTIVE)
 
-  destinationUrl  String?
-  wifiSsid        String?
-  wifiPassword    String?
-  wifiEncryption  String?
+  destinationUrl  String?   @db.VarChar(2048)
+  wifiSsid        String?   @db.VarChar(100)
+  wifiPassword    String?   @db.VarChar(100)
+  wifiEncryption  String?   @db.VarChar(10)
   vcardJson       String?   @db.Text
   textContent     String?   @db.Text
   landingPageId   String?   @unique
@@ -169,8 +169,8 @@ model QRCode {
   bgColor         String    @default("#FFFFFF")
   logoUrl         String?
   moduleShape     String    @default("square")
-  frameType       String?
-  frameLabel      String?
+  frameType       String?   @db.VarChar(50)
+  frameLabel      String?   @db.VarChar(50)
 
   totalScans      Int       @default(0)
   uniqueScans     Int       @default(0)
@@ -202,6 +202,8 @@ model LandingPage {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
 }
 
 // ─── Analytics ───────────────────────────────────────────────────────────────

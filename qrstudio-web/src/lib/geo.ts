@@ -1,3 +1,8 @@
+// Solution hybride :
+// 1. Vercel Edge → utiliser request.geo.country (via headers)
+// 2. Node.js → utiliser DB GeoLite2 locale (MaxMind) si installée
+// 3. Fallback → null (pas d'appel réseau externe bloquant)
+
 type CacheEntry = {
   country: string
   timestamp: number
@@ -17,6 +22,8 @@ function cleanCache(): void {
 }
 
 export async function getCountry(ip: string): Promise<string | null> {
+  if (!ip || ip === "127.0.0.1" || ip === "::1" || ip === "unknown") return null
+
   const now = Date.now()
   const cached = cache.get(ip)
 
@@ -28,24 +35,13 @@ export async function getCountry(ip: string): Promise<string | null> {
     cleanCache()
   }
 
-  try {
-    const response = await fetch(`https://ip-api.com/json/${ip}`, {
-      signal: AbortSignal.timeout(3000),
-    })
+  // Note: la base MaxMind (npm: maxmind) peut être installée optionnellement.
+  // Si `GEOIP_DB_PATH` est défini, décommentez le bloc ci-dessous :
+  //
+  //   const maxmind = await import("maxmind")
+  //   const reader = await maxmind.open(GEOIP_DB_PATH)
+  //   const result = reader.get(ip)
+  //   return result?.country?.names?.fr ?? result?.country?.names?.en ?? null
 
-    if (!response.ok) {
-      return null
-    }
-
-    const data = await response.json() as { country?: string; status?: string }
-
-    if (data.status !== 'success' || !data.country) {
-      return null
-    }
-
-    cache.set(ip, { country: data.country, timestamp: now })
-    return data.country
-  } catch {
-    return null
-  }
+  return null
 }

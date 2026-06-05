@@ -2,6 +2,7 @@ import { prisma } from "@/server/db"
 import { Prisma } from "@prisma/client"
 import { getCountry } from "@/lib/geo"
 import { parseDevice, parseOs, parseBrowser } from "@/lib/user-agent"
+import logger from "@/lib/logger"
 import { createHash } from "crypto"
 
 export interface ScanInput {
@@ -36,7 +37,8 @@ export const analyticsService = {
     if (data.ip) {
       try {
         country = await getCountry(data.ip)
-      } catch {
+      } catch (error) {
+        logger.error("Erreur géolocalisation IP", error)
         country = null
       }
     }
@@ -45,43 +47,45 @@ export const analyticsService = {
     const os = data.userAgent ? parseOs(data.userAgent) : null
     const browser = data.userAgent ? parseBrowser(data.userAgent) : null
 
-    await prisma.scan.create({
-      data: {
-        qrCodeId: data.qrCodeId,
-        ipHash,
-        country,
-        deviceType,
-        os,
-        browser,
-        referer: data.referer ?? null,
-      },
-    })
-
-    await prisma.qRCode.update({
-      where: { id: data.qrCodeId },
-      data: {
-        totalScans: { increment: 1 },
-        lastScannedAt: new Date(),
-      },
-    })
-
-    if (ipHash) {
-      const recentScan = await prisma.scan.findFirst({
-        where: {
+    await prisma.$transaction(async (tx) => {
+      await tx.scan.create({
+        data: {
           qrCodeId: data.qrCodeId,
           ipHash,
-          scannedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          country,
+          deviceType,
+          os,
+          browser,
+          referer: data.referer ?? null,
         },
-        orderBy: { scannedAt: 'desc' },
       })
 
-      if (!recentScan) {
-        await prisma.qRCode.update({
-          where: { id: data.qrCodeId },
-          data: { uniqueScans: { increment: 1 } },
+      await tx.qRCode.update({
+        where: { id: data.qrCodeId },
+        data: {
+          totalScans: { increment: 1 },
+          lastScannedAt: new Date(),
+        },
+      })
+
+      if (ipHash) {
+        const recentScan = await tx.scan.findFirst({
+          where: {
+            qrCodeId: data.qrCodeId,
+            ipHash,
+            scannedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          },
+          orderBy: { scannedAt: 'desc' },
         })
+
+        if (!recentScan) {
+          await tx.qRCode.update({
+            where: { id: data.qrCodeId },
+            data: { uniqueScans: { increment: 1 } },
+          })
+        }
       }
-    }
+    })
   },
 
   async getAnalytics(qrCodeId: string, period: '7d' | '30d' | '90d' | 'all', retentionDays?: number) {

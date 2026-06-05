@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/nextjs"
 import { Resend } from "resend"
+import logger from "@/lib/logger"
 
 function createResendClient(): Resend | null {
   const apiKey = process.env.RESEND_API_KEY
@@ -64,6 +65,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
+      logger.error("Erreur envoi email bienvenue", error)
       Sentry.captureException(error)
     }
   },
@@ -91,6 +93,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
+      logger.error("Erreur envoi email invitation", error)
       Sentry.captureException(error)
     }
   },
@@ -111,6 +114,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
+      logger.error("Erreur envoi email suppression compte", error)
       Sentry.captureException(error)
     }
   },
@@ -131,6 +135,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
+      logger.error("Erreur envoi email changement mot de passe", error)
       Sentry.captureException(error)
     }
   },

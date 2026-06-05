@@ -8,12 +8,15 @@ const prismaMock = vi.hoisted(() => {
     }
     return m
   }
-  return {
+  const m = {
     qRCode: model(),
     scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count", "groupBy"]),
     workspaceMember: model(),
     $queryRaw: vi.fn(),
+    $transaction: vi.fn() as ReturnType<typeof vi.fn>,
   }
+  m.$transaction.mockImplementation((fn: (tx: typeof m) => unknown) => fn(m))
+  return m
 })
 
 vi.mock("@/server/db", () => ({ prisma: prismaMock }))
@@ -38,6 +41,17 @@ describe("analyticsService", () => {
       userAgent: "Mozilla/5.0 Chrome",
       referer: "https://google.com",
     }
+
+    it("should wrap operations in a prisma.$transaction", async () => {
+      prismaMock.scan.create.mockResolvedValue({ id: "scan-tx" } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+      prismaMock.scan.findFirst.mockResolvedValue(null)
+
+      await analyticsService.recordScan(scanInput)
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
+      expect(typeof (prismaMock.$transaction.mock.calls[0] as [{ fn: unknown }])[0]).toBe("function")
+    })
 
     it("should create a scan record and increment totalScans", async () => {
       prismaMock.scan.create.mockResolvedValue({ id: "scan-1" } as never)

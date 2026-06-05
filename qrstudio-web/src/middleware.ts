@@ -8,13 +8,20 @@ const publicPrefixes = [
   "/api/qr/",
   "/api/auth/",
   "/api/webhooks/",
+  "/api/health/",
   "/api/uploadthing/",
   "/invite/",
   "/l/",
   "/view/",
 ]
 
+function addRequestId(response: NextResponse, requestId: string): NextResponse {
+  response.headers.set("X-Request-ID", requestId)
+  return response
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  const requestId = crypto.randomUUID()
   const url = request.nextUrl.pathname
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
@@ -22,23 +29,25 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (url.startsWith("/api/qr/")) {
     const { success, remaining } = await qrRateLimit.limit(ip)
     if (!success) {
-      return new NextResponse("Too Many Requests", {
+      const resp = new NextResponse("Too Many Requests", {
         status: 429,
         headers: { "Retry-After": "60", "X-RateLimit-Remaining": "0" },
       })
+      return addRequestId(resp, requestId)
     }
     const response = NextResponse.next()
     response.headers.set("X-RateLimit-Remaining", String(remaining))
-    return response
+    return addRequestId(response, requestId)
   }
 
   if (["/login", "/register"].includes(url)) {
     const { success } = await authRateLimit.limit(ip)
     if (!success) {
-      return new NextResponse("Trop de tentatives. Réessayez dans une heure.", {
+      const resp = new NextResponse("Trop de tentatives. Réessayez dans une heure.", {
         status: 429,
         headers: { "Retry-After": "3600" },
       })
+      return addRequestId(resp, requestId)
     }
   }
 
@@ -47,7 +56,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     url.startsWith(prefix)
   )
   if (isPublicPrefix) {
-    return NextResponse.next()
+    return addRequestId(NextResponse.next(), requestId)
   }
 
   const token = await getToken({
@@ -59,7 +68,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // Redirect authenticated users away from auth pages
   if (isAuthenticated && authRoutes.includes(url)) {
-    return NextResponse.redirect(new URL("/dashboard", request.url))
+    return addRequestId(NextResponse.redirect(new URL("/dashboard", request.url)), requestId)
   }
 
   // Redirect unauthenticated users to login
@@ -68,10 +77,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!isAuthenticated && isProtectedRoute) {
     const loginUrl = new URL("/login", request.url)
     loginUrl.searchParams.set("callbackUrl", url)
-    return NextResponse.redirect(loginUrl)
+    return addRequestId(NextResponse.redirect(loginUrl), requestId)
   }
 
-  return NextResponse.next()
+  return addRequestId(NextResponse.next(), requestId)
 }
 
 export const config = {

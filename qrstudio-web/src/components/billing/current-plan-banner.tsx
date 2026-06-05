@@ -19,9 +19,9 @@ const PLAN_LABELS: Record<string, string> = {
 }
 
 const PLAN_COLORS: Record<string, string> = {
-  FREE: "bg-muted text-muted-foreground",
-  PRO: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  AGENCY: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  FREE: "bg-muted text-muted-foreground border border-border",
+  PRO: "bg-primary/10 text-primary border border-primary/20",
+  AGENCY: "bg-accent text-accent-foreground border border-accent",
 }
 
 export function CurrentPlanBanner({
@@ -45,7 +45,7 @@ export function CurrentPlanBanner({
     switch (status) {
       case "active":
         return (
-          <Badge variant="default" className="gap-1 bg-green-600">
+          <Badge variant="default" className="gap-1 bg-accent text-accent-foreground border border-accent">
             <CheckCircleIcon className="size-3" />
             Actif
           </Badge>
@@ -80,8 +80,8 @@ export function CurrentPlanBanner({
         plan === "FREE"
           ? "border-dashed"
           : plan === "PRO"
-            ? "border-blue-200 dark:border-blue-800"
-            : "border-purple-200 dark:border-purple-800"
+            ? "border-primary/20"
+            : "border-accent"
       }
     >
       <CardContent className="flex flex-wrap items-center justify-between gap-4 py-6">

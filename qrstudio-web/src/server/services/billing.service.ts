@@ -1,6 +1,8 @@
 import Stripe from "stripe"
 import { TRPCError } from "@trpc/server"
 import { prisma } from "@/server/db"
+import { withRetry } from "@/lib/retry"
+import logger from "@/lib/logger"
 import * as Sentry from "@sentry/nextjs"
 import type { Plan } from "@/types/index"
 import { hasEventBeenProcessed, markEventProcessed } from "./stripe-idempotency"
@@ -55,14 +57,16 @@ export const billingService = {
       })
     }
 
-    const session = await getStripe().checkout.sessions.create({
-      customer: stripeCustomerId,
-      mode: "subscription",
-      line_items: [{ price: priceId, quantity: 1 }],
-      metadata: { userId: user.id, plan },
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-    })
+    const session = await withRetry(() =>
+      getStripe().checkout.sessions.create({
+        customer: stripeCustomerId,
+        mode: "subscription",
+        line_items: [{ price: priceId, quantity: 1 }],
+        metadata: { userId: user.id, plan },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+      })
+    )
 
     if (!session.url) {
       throw new TRPCError({
@@ -94,7 +98,9 @@ export const billingService = {
     }
 
     try {
-      const subscription = await getStripe().subscriptions.retrieve(user.stripeSubscriptionId)
+      const subscription = await withRetry(() =>
+        getStripe().subscriptions.retrieve(user.stripeSubscriptionId!)
+      )
       const item = subscription.items.data[0]
 
       return {
@@ -105,7 +111,8 @@ export const billingService = {
           : null,
         cancelAtPeriodEnd: subscription.cancel_at_period_end,
       }
-    } catch {
+    } catch (error) {
+      logger.error("Échec récupération abonnement Stripe", error)
       Sentry.captureException(new Error("Échec récupération abonnement Stripe"))
       return {
         plan: user.plan as Plan,

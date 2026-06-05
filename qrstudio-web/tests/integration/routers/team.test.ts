@@ -7,12 +7,17 @@ const prismaMock = vi.hoisted(() => {
     for (const method of methods) { m[method] = vi.fn() }
     return m
   }
-  return {
+  const m = {
     workspaceMember: model(),
     workspaceInvitation: model(),
     workspace: model(),
     user: model(),
+    $transaction: vi.fn() as ReturnType<typeof vi.fn>,
   }
+  m.$transaction.mockImplementation(
+    (fn: (tx: typeof m) => unknown) => fn(m)
+  )
+  return m
 })
 
 vi.mock("@/server/auth", () => ({ auth: vi.fn() }))

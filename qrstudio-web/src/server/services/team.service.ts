@@ -126,17 +126,19 @@ export const teamService = {
       })
     }
 
-    await prisma.workspaceMember.create({
-      data: {
-        workspaceId: invitation.workspaceId,
-        userId,
-        role: invitation.role,
-      },
-    })
+    await prisma.$transaction(async (tx) => {
+      await tx.workspaceMember.create({
+        data: {
+          workspaceId: invitation.workspaceId,
+          userId,
+          role: invitation.role,
+        },
+      })
 
-    await prisma.workspaceInvitation.update({
-      where: { id: invitation.id },
-      data: { acceptedAt: new Date() },
+      await tx.workspaceInvitation.update({
+        where: { id: invitation.id },
+        data: { acceptedAt: new Date() },
+      })
     })
 
     return { workspaceId: invitation.workspaceId, workspaceName: invitation.workspace.name }

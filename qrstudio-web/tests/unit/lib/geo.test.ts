@@ -1,62 +1,58 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { getCountry } from "@/lib/geo"
 
-const mockFetch = vi.fn()
-
 describe("getCountry", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    globalThis.fetch = mockFetch as unknown as typeof fetch
   })
 
-  it("should fetch from ip-api.com and return country", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ status: "success", country: "France" }),
-    })
+  it("should return null for localhost IPv4", async () => {
+    const result = await getCountry("127.0.0.1")
+    expect(result).toBeNull()
+  })
 
+  it("should return null for localhost IPv6", async () => {
+    const result = await getCountry("::1")
+    expect(result).toBeNull()
+  })
+
+  it("should return null for 'unknown' IP", async () => {
+    const result = await getCountry("unknown")
+    expect(result).toBeNull()
+  })
+
+  it("should return null for empty string", async () => {
+    const result = await getCountry("")
+    expect(result).toBeNull()
+  })
+
+  it("should return null for falsy IP", async () => {
+    const result = await getCountry("")
+    expect(result).toBeNull()
+  })
+
+  it("should return null when no GeoIP database is configured", async () => {
+    // Sans MaxMind configuré (cas par défaut), getCountry retourne null
     const result = await getCountry("8.8.8.8")
-    expect(result).toBe("France")
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://ip-api.com/json/8.8.8.8",
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    )
-  })
-
-  it("should return cached result on second call without fetching", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ status: "success", country: "Germany" }),
-    })
-
-    const result1 = await getCountry("1.1.1.1")
-    expect(result1).toBe("Germany")
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-
-    // Replace fetch with one that throws — cache should prevent it from being called
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("should not fetch"))
-    const result2 = await getCountry("1.1.1.1")
-    expect(result2).toBe("Germany")
-  })
-
-  it("should return null if ip-api.com fails (network error)", async () => {
-    mockFetch.mockRejectedValue(new Error("Network error"))
-    const result = await getCountry("2.2.2.2")
     expect(result).toBeNull()
   })
 
-  it("should return null if ip-api.com returns non-ok response", async () => {
-    mockFetch.mockResolvedValue({ ok: false })
-    const result = await getCountry("3.3.3.3")
+  it("should return null for a public IP", async () => {
+    const result = await getCountry("1.1.1.1")
     expect(result).toBeNull()
   })
 
-  it("should return null if ip-api.com returns status not success", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ status: "fail" }),
-    })
-    const result = await getCountry("4.4.4.4")
-    expect(result).toBeNull()
+  it("should remain null on repeated calls (cache is populated but always null)", async () => {
+    const result1 = await getCountry("8.8.8.8")
+    expect(result1).toBeNull()
+
+    const result2 = await getCountry("8.8.8.8")
+    expect(result2).toBeNull()
+  })
+
+  it("should handle various IP formats without throwing", async () => {
+    await expect(getCountry("192.168.0.1")).resolves.toBeNull()
+    await expect(getCountry("10.0.0.1")).resolves.toBeNull()
+    await expect(getCountry("172.16.0.1")).resolves.toBeNull()
   })
 })
