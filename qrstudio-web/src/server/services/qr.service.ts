@@ -3,7 +3,7 @@ import { prisma } from "@/server/db"
 import { PLAN_LIMITS } from "@/lib/constants"
 import { generateShortCode } from "@/lib/utils"
 import { generateQRSvg } from "@/lib/qr-generator"
-import type { Plan, QRStatus, QRType } from "@prisma/client"
+import type { Plan, QRStatus, QRType, Prisma } from "@prisma/client"
 import type { QRCreateInput, QRUpdateInput } from "@/lib/validations"
 
 type PlanKey = keyof typeof PLAN_LIMITS
@@ -20,23 +20,25 @@ export interface QRDataInput {
   textContent?: string | null
 }
 
-export function getDestinationUrl(type: QRType, input: QRCreateInput): string | null {
-  switch (type) {
-    case 'URL':
-    case 'PDF':
-      return input.destinationUrl ?? null
-    case 'WHATSAPP': {
-      const phone = input.destinationUrl ?? ''
-      // Stocker uniquement les chiffres pour compatibilité avec resolveDestination et prepareQRData
-      return phone.replace(/[^0-9]/g, '')
-    }
-    case 'WIFI':
-      return `${input.wifi?.ssid ?? ''}${input.wifi?.password ? ':' + input.wifi.password : ''}`
-    case 'TEXT':
-    case 'VCARD':
-    case 'LANDING_PAGE':
-      return null
+/**
+ * Maps a QRDataInput-shaped object into a JSONB-compatible metadata object.
+ * Only includes keys that are relevant to the QR type.
+ */
+function toMetadata(input: { destinationUrl?: string | null; wifi?: Record<string, unknown> | null; vcard?: Record<string, unknown> | null; textContent?: string | null }): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {}
+  if (input.destinationUrl !== undefined && input.destinationUrl !== null) {
+    metadata.destinationUrl = input.destinationUrl
   }
+  if (input.wifi !== undefined) {
+    metadata.wifi = input.wifi ?? null
+  }
+  if (input.vcard !== undefined) {
+    metadata.vcard = input.vcard ?? null
+  }
+  if (input.textContent !== undefined && input.textContent !== null) {
+    metadata.textContent = input.textContent
+  }
+  return metadata
 }
 
 export const qrService = {
@@ -77,8 +79,6 @@ export const qrService = {
 
     const shortCode = await qrService.generateUniqueShortCode()
 
-    const destinationUrl = getDestinationUrl(data.type as QRType, data)
-
     let landingPageId: string | undefined
 
     if (data.type === 'LANDING_PAGE' && data.landingPage) {
@@ -112,12 +112,7 @@ export const qrService = {
         shortCode,
         name: data.name,
         type: data.type as QRType,
-        destinationUrl,
-        wifiSsid: data.wifi?.ssid ?? null,
-        wifiPassword: data.wifi?.password ?? null,
-        wifiEncryption: data.wifi?.encryption ?? null,
-        vcardJson: data.vcard ? JSON.stringify(data.vcard) : null,
-        textContent: data.textContent ?? null,
+        metadata: toMetadata(data) as Prisma.InputJsonValue,
         landingPageId: landingPageId ?? null,
         fgColor: data.fgColor ?? '#000000',
         bgColor: data.bgColor ?? '#FFFFFF',
@@ -142,19 +137,29 @@ export const qrService = {
     }
 
     const updateData: Record<string, unknown> = {}
+    const metadataFields = ['destinationUrl', 'wifi', 'vcard', 'textContent'] as const
+    const contentChanged = metadataFields.some((f) => (data as Record<string, unknown>)[f] !== undefined)
 
     if (data.name !== undefined) updateData.name = data.name
-    if (data.destinationUrl !== undefined) updateData.destinationUrl = data.destinationUrl
-    if (data.wifi !== undefined) {
-      updateData.wifiSsid = data.wifi.ssid
-      updateData.wifiPassword = data.wifi.password ?? null
-      updateData.wifiEncryption = data.wifi.encryption
-    }
-    if (data.vcard !== undefined) {
-      updateData.vcardJson = data.vcard ? JSON.stringify(data.vcard) : null
-    }
-    if (data.textContent !== undefined) {
-      updateData.textContent = data.textContent
+
+    if (contentChanged) {
+      const currentMetadata = (existing.metadata as Record<string, unknown>) ?? {}
+      const newMetadata: Record<string, unknown> = { ...currentMetadata }
+
+      if (data.destinationUrl !== undefined) {
+        newMetadata.destinationUrl = data.destinationUrl === null ? null : data.destinationUrl
+      }
+      if (data.wifi !== undefined) {
+        newMetadata.wifi = data.wifi === null ? null : data.wifi
+      }
+      if (data.vcard !== undefined) {
+        newMetadata.vcard = data.vcard === null ? null : data.vcard
+      }
+      if (data.textContent !== undefined) {
+        newMetadata.textContent = data.textContent === null ? null : data.textContent
+      }
+
+      updateData.metadata = newMetadata as Prisma.InputJsonValue
     }
 
     const designChanged = data.fgColor !== undefined || data.bgColor !== undefined ||
@@ -257,12 +262,7 @@ export const qrService = {
   prepareQRDataFromEntity(
     entity: {
       type: string
-      destinationUrl: string | null
-      wifiSsid: string | null
-      wifiPassword: string | null
-      wifiEncryption: string | null
-      vcardJson: string | null
-      textContent: string | null
+      metadata: unknown
       shortCode: string
     },
   ): string {
@@ -296,58 +296,57 @@ export function prepareQRData(input: QRDataInput, shortCode: string): string {
 }
 
 /**
- * Converts a Prisma QRCode entity to QRDataInput and calls prepareQRData.
- * Useful in routers where the entity fields are flat (wifiSsid, vcardJson, etc.).
+ * Converts a Prisma QRCode entity with a JSONB metadata column to QRDataInput.
  */
 function toQRDataInput(
   entity: {
     type: string
-    destinationUrl: string | null
-    wifiSsid: string | null
-    wifiPassword: string | null
-    wifiEncryption: string | null
-    vcardJson: string | null
-    textContent: string | null
+    metadata: unknown
   },
 ): QRDataInput {
+  const metadata = (entity.metadata as Record<string, unknown>) ?? {}
   return {
     type: entity.type as QRType,
-    destinationUrl: entity.destinationUrl ?? undefined,
-    wifi: entity.wifiSsid
-      ? {
-          ssid: entity.wifiSsid,
-          password: entity.wifiPassword ?? undefined,
-          encryption: (entity.wifiEncryption ?? 'nopass') as 'WPA' | 'WEP' | 'nopass',
-        }
-      : undefined,
-    vcard: entity.vcardJson ? JSON.parse(entity.vcardJson) : undefined,
-    textContent: entity.textContent ?? undefined,
+    destinationUrl: (metadata.destinationUrl as string | undefined) ?? undefined,
+    wifi: metadata.wifi as { ssid?: string; password?: string; encryption?: string } | undefined,
+    vcard: metadata.vcard as { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string } | undefined,
+    textContent: (metadata.textContent as string | undefined) ?? undefined,
   }
 }
 
-function prepareQRDataForUpdate(existing: { type: string; shortCode?: string; destinationUrl?: string | null; wifiSsid?: string | null; wifiPassword?: string | null; wifiEncryption?: string | null; vcardJson?: string | null; textContent?: string | null }, data: QRUpdateInput): string {
+function prepareQRDataForUpdate(existing: { type: string; shortCode?: string; metadata?: unknown }, data: QRUpdateInput): string {
   const type = existing.type as QRType
+  const meta = existing.metadata as Record<string, unknown> | null | undefined
+
   switch (type) {
-    case 'URL':
-      return data.destinationUrl ?? existing.destinationUrl ?? ''
+    case 'URL': {
+      const dest = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
+      return dest
+    }
     case 'WHATSAPP': {
-      const phone = data.destinationUrl ?? existing.destinationUrl ?? ''
+      const phone = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
       return `https://wa.me/${phone.replace(/[^0-9]/g, '')}`
     }
     case 'WIFI': {
-      const ssid = data.wifi?.ssid ?? existing.wifiSsid ?? ''
-      const password = data.wifi?.password ?? existing.wifiPassword ?? undefined
-      const encryption = (data.wifi?.encryption ?? existing.wifiEncryption ?? 'nopass') as 'WPA' | 'WEP' | 'nopass'
+      const wifiMeta = meta?.wifi as Record<string, string> | undefined
+      const ssid = data.wifi?.ssid ?? wifiMeta?.ssid ?? ''
+      const password = data.wifi?.password ?? wifiMeta?.password ?? undefined
+      const encryption = (data.wifi?.encryption ?? wifiMeta?.encryption ?? 'nopass') as 'WPA' | 'WEP' | 'nopass'
       return formatWifiString(ssid, password, encryption)
     }
     case 'VCARD': {
       if (data.vcard) return formatVCardString(data.vcard)
-      return existing.vcardJson ?? ''
+      const vcardMeta = meta?.vcard as Record<string, string> | undefined
+      return vcardMeta ? formatVCardString(vcardMeta) : ''
     }
-    case 'PDF':
-      return data.destinationUrl ?? existing.destinationUrl ?? ''
-    case 'TEXT':
-      return data.textContent ?? existing.textContent ?? ''
+    case 'PDF': {
+      const dest = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
+      return dest
+    }
+    case 'TEXT': {
+      const text = data.textContent ?? (meta?.textContent as string | undefined) ?? ''
+      return text
+    }
     case 'LANDING_PAGE': {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
       return `${appUrl}/l/${existing.shortCode ?? 'unknown'}`

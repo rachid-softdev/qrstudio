@@ -4,11 +4,15 @@ import { resolveDestination } from "@/server/services/redirect.service"
 type QRType = "URL" | "WHATSAPP" | "WIFI" | "VCARD" | "PDF" | "TEXT" | "LANDING_PAGE"
 
 function makeQR(overrides: { type: QRType; destinationUrl?: string | null; shortCode?: string }) {
+  const metadata: Record<string, unknown> = {}
+  if (overrides.destinationUrl !== undefined && overrides.destinationUrl !== null) {
+    metadata.destinationUrl = overrides.destinationUrl
+  }
   return {
     shortCode: overrides.shortCode ?? "abc123",
     type: overrides.type,
     status: "ACTIVE" as const,
-    destinationUrl: overrides.destinationUrl ?? null,
+    metadata,
   }
 }
 

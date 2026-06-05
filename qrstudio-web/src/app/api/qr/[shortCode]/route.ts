@@ -32,7 +32,7 @@ export async function GET(
       shortCode: qrCode.shortCode,
       type: qrCode.type,
       status: qrCode.status,
-      destinationUrl: qrCode.destinationUrl,
+      metadata: qrCode.metadata,
     })
 
     const ip =

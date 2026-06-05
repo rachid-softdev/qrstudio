@@ -20,12 +20,7 @@ interface QREditorProps {
     id: string
     name: string
     type: QRType
-    destinationUrl: string | null
-    wifiSsid: string | null
-    wifiPassword: string | null
-    wifiEncryption: string | null
-    vcardJson: string | null
-    textContent: string | null
+    metadata: unknown
     fgColor: string
     bgColor: string
     moduleShape: string
@@ -41,25 +36,19 @@ export function QREditor({ qrCode }: QREditorProps) {
   const [activeTab, setActiveTab] = useState("destination")
 
   const [content, setContent] = useState<Record<string, unknown>>(() => {
+    const meta = (qrCode.metadata as Record<string, unknown>) ?? {}
     const base: Record<string, unknown> = {
-      destinationUrl: qrCode.destinationUrl ?? "",
+      destinationUrl: (meta.destinationUrl as string) ?? "",
     }
     if (qrCode.type === "WIFI") {
-      base.wifi = {
-        ssid: qrCode.wifiSsid ?? "",
-        password: qrCode.wifiPassword ?? "",
-        encryption: qrCode.wifiEncryption ?? "nopass",
-      }
+      const wifi = meta.wifi as Record<string, string> | undefined
+      base.wifi = wifi ?? { ssid: "", password: "", encryption: "nopass" }
     }
-    if (qrCode.type === "VCARD" && qrCode.vcardJson) {
-      try {
-        base.vcard = JSON.parse(qrCode.vcardJson)
-      } catch {
-        base.vcard = {}
-      }
+    if (qrCode.type === "VCARD") {
+      base.vcard = meta.vcard ?? {}
     }
     if (qrCode.type === "TEXT") {
-      base.textContent = qrCode.textContent ?? ""
+      base.textContent = (meta.textContent as string) ?? ""
     }
     return base
   })

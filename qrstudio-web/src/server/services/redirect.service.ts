@@ -4,15 +4,18 @@ export interface QRCodeRecord {
   shortCode: string
   type: QRType
   status: QRStatus
-  destinationUrl: string | null
+  metadata: unknown
 }
 
 export function resolveDestination(qrCode: QRCodeRecord): string {
+  const metadata = (qrCode.metadata as Record<string, unknown>) ?? {}
+  const destinationUrl = (metadata.destinationUrl as string | undefined) ?? null
+
   switch (qrCode.type) {
     case 'URL':
-      return qrCode.destinationUrl ?? '/'
+      return destinationUrl ?? '/'
     case 'WHATSAPP': {
-      const phone = qrCode.destinationUrl ?? ''
+      const phone = destinationUrl ?? ''
       const cleaned = phone.replace(/[^0-9]/g, '')
       return `https://wa.me/${cleaned}`
     }

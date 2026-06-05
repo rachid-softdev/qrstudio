@@ -157,12 +157,7 @@ model QRCode {
   type        QRType
   status      QRStatus @default(ACTIVE)
 
-  destinationUrl  String?   @db.VarChar(2048)
-  wifiSsid        String?   @db.VarChar(100)
-  wifiPassword    String?   @db.VarChar(100)
-  wifiEncryption  String?   @db.VarChar(10)
-  vcardJson       String?   @db.Text
-  textContent     String?   @db.Text
+  metadata        Json?     @db.JsonB
   landingPageId   String?   @unique
 
   fgColor         String    @default("#000000")

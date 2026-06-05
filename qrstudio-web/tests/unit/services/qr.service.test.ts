@@ -25,74 +25,12 @@ vi.mock("@/server/db", () => ({ prisma: prismaMock }))
 vi.mock("@/lib/utils", () => ({ generateShortCode: vi.fn() }))
 vi.mock("@/lib/qr-generator", () => ({ generateQRSvg: vi.fn().mockResolvedValue("<svg></svg>") }))
 
-import { qrService, prepareQRData, getDestinationUrl } from "@/server/services/qr.service"
+import { qrService, prepareQRData } from "@/server/services/qr.service"
 import * as utils from "@/lib/utils"
 
 describe("qrService", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  // ──────────────────────────────────────────────
-  // getDestinationUrl — all types + WHATSAPP fix
-  // ──────────────────────────────────────────────
-  describe("getDestinationUrl", () => {
-    it("URL type should return destinationUrl as-is", () => {
-      const input = { destinationUrl: "https://example.com" } as QRCreateInput
-      expect(getDestinationUrl("URL", input)).toBe("https://example.com")
-    })
-
-    it("URL type should return null if destinationUrl is undefined", () => {
-      const input = {} as QRCreateInput
-      expect(getDestinationUrl("URL", input)).toBeNull()
-    })
-
-    it("WHATSAPP type should return cleaned phone digits from full URL", () => {
-      const input = { destinationUrl: "https://wa.me/0612345678" } as QRCreateInput
-      expect(getDestinationUrl("WHATSAPP", input)).toBe("0612345678")
-    })
-
-    it("WHATSAPP type should return cleaned digits from international format", () => {
-      const input = { destinationUrl: "+33 6 12 34 56 78" } as QRCreateInput
-      expect(getDestinationUrl("WHATSAPP", input)).toBe("33612345678")
-    })
-
-    it("WHATSAPP type should return empty string for empty input", () => {
-      const input = { destinationUrl: "" } as QRCreateInput
-      expect(getDestinationUrl("WHATSAPP", input)).toBe("")
-    })
-
-    it("WHATSAPP type should return empty string when destinationUrl is undefined", () => {
-      const input = {} as QRCreateInput
-      expect(getDestinationUrl("WHATSAPP", input)).toBe("")
-    })
-
-    it("WIFI type should return ssid:password format", () => {
-      const input = { wifi: { ssid: "HomeNet", password: "secret", encryption: "WPA" as const } } as QRCreateInput
-      expect(getDestinationUrl("WIFI", input)).toBe("HomeNet:secret")
-    })
-
-    it("WIFI type should return ssid only if no password", () => {
-      const input = { wifi: { ssid: "GuestNet", encryption: "nopass" as const } } as QRCreateInput
-      expect(getDestinationUrl("WIFI", input)).toBe("GuestNet")
-    })
-
-    it("TEXT type should return null", () => {
-      expect(getDestinationUrl("TEXT", {} as QRCreateInput)).toBeNull()
-    })
-
-    it("VCARD type should return null", () => {
-      expect(getDestinationUrl("VCARD", {} as QRCreateInput)).toBeNull()
-    })
-
-    it("PDF type should return destinationUrl as-is", () => {
-      const input = { destinationUrl: "https://example.com/doc.pdf" } as QRCreateInput
-      expect(getDestinationUrl("PDF", input)).toBe("https://example.com/doc.pdf")
-    })
-
-    it("LANDING_PAGE type should return null", () => {
-      expect(getDestinationUrl("LANDING_PAGE", {} as QRCreateInput)).toBeNull()
-    })
   })
 
   // ──────────────────────────────────────────────
@@ -323,7 +261,7 @@ describe("qrService", () => {
       await expect(qrService.create(baseInput)).rejects.toMatchObject({ code: "FORBIDDEN" })
     })
 
-    it("should create a WHATSAPP QR code and store cleaned phone as destinationUrl", async () => {
+    it("should create a WHATSAPP QR code and store raw destinationUrl in metadata", async () => {
       vi.mocked(utils.generateShortCode).mockReturnValue("wa1234")
       mockWorkspaceFound("FREE")
       prismaMock.qRCode.count.mockResolvedValue(2)
@@ -339,7 +277,7 @@ describe("qrService", () => {
       await qrService.create(input)
 
       const createCallArgs = prismaMock.qRCode.create.mock.calls[0][0]
-      expect(createCallArgs.data.destinationUrl).toBe("0612345678")
+      expect(createCallArgs.data.metadata.destinationUrl).toBe("https://wa.me/0612345678")
     })
 
     it("should create a LANDING_PAGE QR code with associated LandingPage", async () => {
@@ -382,18 +320,13 @@ describe("qrService", () => {
       workspaceId: "ws-1",
       type: "URL",
       shortCode: "abc123",
-      destinationUrl: "https://old.com",
+      metadata: { destinationUrl: "https://old.com" },
       fgColor: "#000000",
       bgColor: "#FFFFFF",
       moduleShape: "square",
       logoUrl: null,
       frameType: null,
       frameLabel: null,
-      wifiSsid: null,
-      wifiPassword: null,
-      wifiEncryption: null,
-      vcardJson: null,
-      textContent: null,
       landingPageId: null,
       landingPage: null,
     }
@@ -408,7 +341,7 @@ describe("qrService", () => {
       expect(result.svgContent).toBeUndefined()
       expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
         where: { id: "qr-1" },
-        data: { destinationUrl: "https://new.com" },
+        data: { metadata: { destinationUrl: "https://new.com" } },
       })
     })
 
@@ -421,7 +354,7 @@ describe("qrService", () => {
       expect(result.id).toBe("qr-1")
       expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
         where: { id: "qr-1" },
-        data: { name: "New Name", destinationUrl: "https://new.com" },
+        data: { name: "New Name", metadata: { destinationUrl: "https://new.com" } },
       })
     })
 
@@ -439,10 +372,7 @@ describe("qrService", () => {
       const existingWifi = {
         ...existingQR,
         type: "WIFI",
-        destinationUrl: null,
-        wifiSsid: "OldNet",
-        wifiPassword: "oldpass",
-        wifiEncryption: "WPA",
+        metadata: { wifi: { ssid: "OldNet", password: "oldpass", encryption: "WPA" } },
       }
       prismaMock.qRCode.findFirst.mockResolvedValue(existingWifi as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
@@ -453,7 +383,7 @@ describe("qrService", () => {
 
       expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
         where: { id: "qr-2" },
-        data: { wifiSsid: "NewNet", wifiPassword: "newpass", wifiEncryption: "WPA" },
+        data: { metadata: { wifi: { ssid: "NewNet", password: "newpass", encryption: "WPA" } } },
       })
     })
 
@@ -505,7 +435,7 @@ describe("qrService", () => {
       const existingWA = {
         ...existingQR,
         type: "WHATSAPP",
-        destinationUrl: "0612345678",
+        metadata: { destinationUrl: "0612345678" },
       }
       prismaMock.qRCode.findFirst.mockResolvedValue(existingWA as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
@@ -518,8 +448,7 @@ describe("qrService", () => {
       const existingVcard = {
         ...existingQR,
         type: "VCARD",
-        destinationUrl: null,
-        vcardJson: JSON.stringify({ firstName: "John", lastName: "Doe" }),
+        metadata: { vcard: { firstName: "John", lastName: "Doe" } },
       }
       prismaMock.qRCode.findFirst.mockResolvedValue(existingVcard as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
@@ -532,7 +461,7 @@ describe("qrService", () => {
       const existingPdf = {
         ...existingQR,
         type: "PDF",
-        destinationUrl: "https://example.com/doc.pdf",
+        metadata: { destinationUrl: "https://example.com/doc.pdf" },
       }
       prismaMock.qRCode.findFirst.mockResolvedValue(existingPdf as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
@@ -545,8 +474,7 @@ describe("qrService", () => {
       const existingText = {
         ...existingQR,
         type: "TEXT",
-        destinationUrl: null,
-        textContent: "Hello World",
+        metadata: { textContent: "Hello World" },
       }
       prismaMock.qRCode.findFirst.mockResolvedValue(existingText as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
@@ -559,10 +487,7 @@ describe("qrService", () => {
       const existingWifi = {
         ...existingQR,
         type: "WIFI",
-        destinationUrl: null,
-        wifiSsid: "MyNet",
-        wifiPassword: "secret",
-        wifiEncryption: "WPA",
+        metadata: { wifi: { ssid: "MyNet", password: "secret", encryption: "WPA" } },
       }
       prismaMock.qRCode.findFirst.mockResolvedValue(existingWifi as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
@@ -575,8 +500,7 @@ describe("qrService", () => {
       const existingVcard = {
         ...existingQR,
         type: "VCARD",
-        destinationUrl: null,
-        vcardJson: JSON.stringify({ firstName: "John", lastName: "Doe" }),
+        metadata: { vcard: { firstName: "John", lastName: "Doe" } },
       }
       prismaMock.qRCode.findFirst.mockResolvedValue(existingVcard as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
@@ -592,7 +516,7 @@ describe("qrService", () => {
       const existingLP = {
         ...existingQR,
         type: "LANDING_PAGE",
-        destinationUrl: null,
+        metadata: {},
         shortCode: "lpsc01",
         landingPage: { id: "lp-1", title: "Old" },
       }

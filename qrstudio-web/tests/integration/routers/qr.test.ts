@@ -197,11 +197,11 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({
         id: "qr-1", workspaceId: "ws-1", shortCode: "abc123", name: "My QR",
-        type: "URL", status: "ACTIVE", destinationUrl: "https://ex.com",
+        type: "URL", status: "ACTIVE",
+        metadata: { destinationUrl: "https://ex.com" },
         fgColor: "#000", bgColor: "#FFF", moduleShape: "square",
         logoUrl: null, frameType: null, frameLabel: null,
-        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
-        vcardJson: null, textContent: null, landingPageId: null,
+        landingPageId: null,
         landingPage: null, totalScans: 0, uniqueScans: 0,
         lastScannedAt: null, createdAt: new Date(), updatedAt: new Date(),
       } as never)
@@ -239,10 +239,10 @@ describe("qrRouter", () => {
       prismaMock.qRCode.findFirst.mockResolvedValue({
         id: "qr-lp", workspaceId: "ws-1", shortCode: "lp1", name: "LP QR",
         type: "LANDING_PAGE", status: "ACTIVE",
-        destinationUrl: null, fgColor: "#000", bgColor: "#FFF", moduleShape: "square",
+        metadata: {},
+        fgColor: "#000", bgColor: "#FFF", moduleShape: "square",
         logoUrl: null, frameType: null, frameLabel: null,
-        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
-        vcardJson: null, textContent: null, landingPageId: "lp-1",
+        landingPageId: "lp-1",
         landingPage: { id: "lp-1", title: "Welcome", description: "LP desc" },
         totalScans: 0, uniqueScans: 0,
         lastScannedAt: null, createdAt: new Date(), updatedAt: new Date(),
@@ -259,11 +259,11 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({
         id: "qr-1", workspaceId: "ws-1", shortCode: "abc123",
-        type: "URL", status: "ACTIVE", destinationUrl: "https://ex.com",
+        type: "URL", status: "ACTIVE",
+        metadata: { destinationUrl: "https://ex.com" },
         fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
         logoUrl: null, frameType: null, frameLabel: null,
-        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
-        vcardJson: null, textContent: null, landingPageId: null,
+        landingPageId: null,
       } as never)
 
       const result = await qrRouter.createCaller(authed()).exportSvg({ id: "qr-1", workspaceId: "ws-1" })
@@ -274,11 +274,11 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({
         id: "qr-wifi", workspaceId: "ws-1", shortCode: "wifisc",
-        type: "WIFI", status: "ACTIVE", destinationUrl: null,
+        type: "WIFI", status: "ACTIVE",
+        metadata: { wifi: { ssid: "HomeNet", password: "secret", encryption: "WPA" } },
         fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
         logoUrl: null, frameType: null, frameLabel: null,
-        wifiSsid: "HomeNet", wifiPassword: "secret", wifiEncryption: "WPA",
-        vcardJson: null, textContent: null, landingPageId: null,
+        landingPageId: null,
       } as never)
 
       const result = await qrRouter.createCaller(authed()).exportSvg({ id: "qr-wifi", workspaceId: "ws-1" })
@@ -289,12 +289,11 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({
         id: "qr-vc", workspaceId: "ws-1", shortCode: "vc123",
-        type: "VCARD", status: "ACTIVE", destinationUrl: null,
+        type: "VCARD", status: "ACTIVE",
+        metadata: { vcard: { firstName: "John", lastName: "Doe" } },
         fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
         logoUrl: null, frameType: null, frameLabel: null,
-        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
-        vcardJson: JSON.stringify({ firstName: "John", lastName: "Doe" }),
-        textContent: null, landingPageId: null,
+        landingPageId: null,
       } as never)
 
       const result = await qrRouter.createCaller(authed()).exportSvg({ id: "qr-vc", workspaceId: "ws-1" })
@@ -314,11 +313,11 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({
         id: "qr-1", workspaceId: "ws-1", shortCode: "abc123",
-        type: "URL", status: "ACTIVE", destinationUrl: "https://ex.com",
+        type: "URL", status: "ACTIVE",
+        metadata: { destinationUrl: "https://ex.com" },
         fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
         logoUrl: null, frameType: null, frameLabel: null,
-        wifiSsid: null, wifiPassword: null, wifiEncryption: null,
-        vcardJson: null, textContent: null, landingPageId: null,
+        landingPageId: null,
       } as never)
 
       const result = await qrRouter.createCaller(authed()).exportPng({ id: "qr-1", workspaceId: "ws-1", size: 800 })
@@ -330,11 +329,11 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst.mockResolvedValue({
         id: "qr-wifi-png", workspaceId: "ws-1", shortCode: "wifip",
-        type: "WIFI", status: "ACTIVE", destinationUrl: null,
+        type: "WIFI", status: "ACTIVE",
+        metadata: { wifi: { ssid: "GuestNet", password: "pass", encryption: "WPA" } },
         fgColor: "#000000", bgColor: "#FFFFFF", moduleShape: "square",
         logoUrl: null, frameType: null, frameLabel: null,
-        wifiSsid: "GuestNet", wifiPassword: "pass", wifiEncryption: "WPA",
-        vcardJson: null, textContent: null, landingPageId: null,
+        landingPageId: null,
       } as never)
 
       const result = await qrRouter.createCaller(authed()).exportPng({ id: "qr-wifi-png", workspaceId: "ws-1" })
@@ -354,7 +353,7 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst
         .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1" } as never)
-        .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1", type: "URL", destinationUrl: "https://old.com", fgColor: "#000", bgColor: "#FFF", moduleShape: "square" } as never)
+        .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1", type: "URL", metadata: { destinationUrl: "https://old.com" }, fgColor: "#000", bgColor: "#FFF", moduleShape: "square" } as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
 
       const result = await qrRouter.createCaller(authed()).update({ id: "qr-1", workspaceId: "ws-1", name: "Updated" })
@@ -365,7 +364,7 @@ describe("qrRouter", () => {
       mockWorkspaceAccess()
       prismaMock.qRCode.findFirst
         .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1" } as never)
-        .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1", type: "URL", destinationUrl: "https://old.com", fgColor: "#000", bgColor: "#FFF", moduleShape: "square" } as never)
+        .mockResolvedValueOnce({ id: "qr-1", workspaceId: "ws-1", type: "URL", metadata: { destinationUrl: "https://old.com" }, fgColor: "#000", bgColor: "#FFF", moduleShape: "square" } as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
 
       const result = await qrRouter.createCaller(authed()).update({
