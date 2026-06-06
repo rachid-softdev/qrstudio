@@ -167,6 +167,7 @@ model QRCode {
   frameType       String?   @db.VarChar(50)
   frameLabel      String?   @db.VarChar(50)
 
+  deletedAt       DateTime?
   totalScans      Int       @default(0)
   uniqueScans     Int       @default(0)
   lastScannedAt   DateTime?
@@ -182,6 +183,7 @@ model QRCode {
   @@index([workspaceId])
   @@index([createdAt])
   @@index([workspaceId, type, status])
+  @@index([workspaceId, deletedAt])
 }
 
 model LandingPage {

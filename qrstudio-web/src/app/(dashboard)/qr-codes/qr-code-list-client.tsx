@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import { QrCodeIcon } from "lucide-react"
+import { QrCodeIcon, Trash2Icon } from "lucide-react"
 import { api } from "@/lib/trpc/client"
 import { useQRList } from "@/hooks/use-qr-list"
 import { QRCard } from "@/components/qr/qr-card"
@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { Skeleton } from "@/components/shared/loading-skeleton"
 import { Button } from "@/components/ui/button"
 import { QRListFilters } from "@/components/qr/qr-list-filters"
+import { toast } from "sonner"
 import type { QRType, QRStatus } from "@/types"
 
 interface QRCodeListClientProps {
@@ -20,6 +21,7 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [typeFilter, setTypeFilter] = useState<QRType | "all">("all")
   const [statusFilter, setStatusFilter] = useState<QRStatus | "all">("all")
+  const [trashFilter, setTrashFilter] = useState(false)
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -47,6 +49,7 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
       search: debouncedSearch || undefined,
       type: typeFilter !== "all" ? typeFilter : undefined,
       status: statusFilter !== "all" ? statusFilter : undefined,
+      trash: trashFilter,
     })
 
   const utils = api.useUtils()
@@ -54,6 +57,21 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
   const deleteMutation = api.qr.delete.useMutation({
     onSuccess: () => {
       utils.qr.list.invalidate()
+      toast.success("QR code déplacé dans la corbeille")
+    },
+  })
+
+  const restoreMutation = api.qr.restore.useMutation({
+    onSuccess: () => {
+      utils.qr.list.invalidate()
+      toast.success("QR code restauré")
+    },
+  })
+
+  const permanentDeleteMutation = api.qr.permanentDelete.useMutation({
+    onSuccess: () => {
+      utils.qr.list.invalidate()
+      toast.success("QR code supprimé définitivement")
     },
   })
 
@@ -68,6 +86,22 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
       deleteMutation.mutate({ id, workspaceId })
     },
     [deleteMutation, workspaceId],
+  )
+
+  const handleRestore = useCallback(
+    (id: string) => {
+      restoreMutation.mutate({ id, workspaceId })
+    },
+    [restoreMutation, workspaceId],
+  )
+
+  const handlePermanentDelete = useCallback(
+    (id: string) => {
+      if (window.confirm("Êtes-vous sûr de vouloir supprimer définitivement ce QR code ? Cette action est irréversible et supprimera également les pages de destination et les statistiques associées.")) {
+        permanentDeleteMutation.mutate({ id, workspaceId })
+      }
+    },
+    [permanentDeleteMutation, workspaceId],
   )
 
   const handleToggleStatus = useCallback(
@@ -96,6 +130,8 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
         onTypeChange={setTypeFilter}
         status={statusFilter}
         onStatusChange={setStatusFilter}
+        trash={trashFilter}
+        onTrashChange={setTrashFilter}
       />
 
       {isLoading ? (
@@ -105,15 +141,23 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
           ))}
         </div>
       ) : items.length === 0 ? (
-        <EmptyState
-          icon={QrCodeIcon}
-          title="Aucun QR code"
-          description="Créez votre premier QR code pour commencer."
-          action={{
-            label: "Créer un QR code",
-            href: "/dashboard/qr/new",
-          }}
-        />
+        trashFilter ? (
+          <EmptyState
+            icon={Trash2Icon}
+            title="Corbeille vide"
+            description="Aucun QR code dans la corbeille."
+          />
+        ) : (
+          <EmptyState
+            icon={QrCodeIcon}
+            title="Aucun QR code"
+            description="Créez votre premier QR code pour commencer."
+            action={{
+              label: "Créer un QR code",
+              href: "/dashboard/qr/new",
+            }}
+          />
+        )
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((qr) => (
@@ -127,7 +171,10 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
               totalScans={qr.totalScans}
               createdAt={qr.createdAt}
               role="OWNER"
+              trash={trashFilter}
               onDelete={handleDelete}
+              onRestore={handleRestore}
+              onPermanentDelete={handlePermanentDelete}
               onToggleStatus={handleToggleStatus}
             />
           ))}

@@ -23,7 +23,10 @@ interface QRCardProps {
   totalScans: number
   createdAt: Date
   role?: "OWNER" | "EDITOR" | "VIEWER"
+  trash?: boolean
   onDelete?: (id: string) => void
+  onRestore?: (id: string) => void
+  onPermanentDelete?: (id: string) => void
   onToggleStatus?: (id: string, status: QRStatus) => void
 }
 
@@ -51,13 +54,16 @@ export function QRCard({
   totalScans,
   createdAt,
   role,
+  trash = false,
   onDelete,
+  onRestore,
+  onPermanentDelete,
   onToggleStatus,
 }: QRCardProps) {
   const canEdit = role === "OWNER" || role === "EDITOR"
   return (
-    <Link href={`/dashboard/qr/${id}`}>
-      <Card size="sm" className="group cursor-pointer transition-shadow hover:shadow-md">
+    <Link href={trash ? "#" : `/dashboard/qr/${id}`}>
+      <Card size="sm" className={`group cursor-pointer transition-shadow hover:shadow-md ${trash ? "opacity-60" : ""}`}>
         <CardHeader>
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
@@ -86,24 +92,48 @@ export function QRCard({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.preventDefault()
-                      onToggleStatus?.(id, status === "ACTIVE" ? "PAUSED" : "ACTIVE")
-                    }}
-                  >
-                    {status === "ACTIVE" ? "Mettre en pause" : "Activer"}
-                  </DropdownMenuItem>
-                  {role === "OWNER" && (
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        onDelete?.(id)
-                      }}
-                    >
-                      Supprimer
-                    </DropdownMenuItem>
+                  {trash ? (
+                    <>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault()
+                          onRestore?.(id)
+                        }}
+                      >
+                        Restaurer
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          onPermanentDelete?.(id)
+                        }}
+                      >
+                        Supprimer définitivement
+                      </DropdownMenuItem>
+                    </>
+                  ) : (
+                    <>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault()
+                          onToggleStatus?.(id, status === "ACTIVE" ? "PAUSED" : "ACTIVE")
+                        }}
+                      >
+                        {status === "ACTIVE" ? "Mettre en pause" : "Activer"}
+                      </DropdownMenuItem>
+                      {role === "OWNER" && (
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            onDelete?.(id)
+                          }}
+                        >
+                          Supprimer
+                        </DropdownMenuItem>
+                      )}
+                    </>
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -115,9 +145,15 @@ export function QRCard({
             <Badge variant="outline" className="text-xs">
               {typeLabels[type] ?? type}
             </Badge>
-            <Badge variant={statusVariants[status] ?? "outline"} className="text-xs">
-              {status === "ACTIVE" ? "Actif" : "En pause"}
-            </Badge>
+            {trash ? (
+              <Badge variant="outline" className="text-xs">
+                Corbeille
+              </Badge>
+            ) : (
+              <Badge variant={statusVariants[status] ?? "outline"} className="text-xs">
+                {status === "ACTIVE" ? "Actif" : "En pause"}
+              </Badge>
+            )}
           </div>
         </CardContent>
         <CardFooter>

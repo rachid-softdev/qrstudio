@@ -47,7 +47,7 @@ export const qrService = {
     const limit = PLAN_LIMITS[planKey].maxQRCodes
     if (limit === Infinity) return
 
-    const count = await prisma.qRCode.count({ where: { workspaceId } })
+    const count = await prisma.qRCode.count({ where: { workspaceId, deletedAt: null } })
     if (count >= limit) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -128,7 +128,7 @@ export const qrService = {
 
   async update(id: string, workspaceId: string, data: QRUpdateInput): Promise<{ id: string; svgContent?: string }> {
     const existing = await prisma.qRCode.findFirst({
-      where: { id, workspaceId },
+      where: { id, workspaceId, deletedAt: null },
       include: { landingPage: true },
     })
 
@@ -257,6 +257,44 @@ export const qrService = {
       where: { id },
       data: { status },
     })
+  },
+
+  async softDelete(id: string, workspaceId: string): Promise<void> {
+    const qrCode = await prisma.qRCode.findFirst({
+      where: { id, workspaceId },
+    })
+    if (!qrCode) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
+    }
+    if (qrCode.deletedAt) return // already trashed, idempotent
+
+    await prisma.qRCode.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    })
+  },
+
+  async restore(id: string, workspaceId: string): Promise<void> {
+    const qrCode = await prisma.qRCode.findFirst({
+      where: { id, workspaceId, deletedAt: { not: null } },
+    })
+    if (!qrCode) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable dans la corbeille' })
+    }
+
+    await prisma.qRCode.update({
+      where: { id },
+      data: { deletedAt: null },
+    })
+  },
+
+  async permanentDelete(id: string, workspaceId: string): Promise<void> {
+    const result = await prisma.qRCode.deleteMany({
+      where: { id, workspaceId, deletedAt: { not: null } },
+    })
+    if (result.count === 0) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
+    }
   },
 
   prepareQRDataFromEntity(

@@ -11,6 +11,8 @@ import {
 import { QR_TYPES } from "@/lib/constants"
 import type { QRType, QRStatus } from "@/types"
 
+import { Button } from "@/components/ui/button"
+
 interface QRListFiltersProps {
   search: string
   onSearchChange: (value: string) => void
@@ -18,6 +20,8 @@ interface QRListFiltersProps {
   onTypeChange: (value: QRType | "all") => void
   status?: QRStatus | "all"
   onStatusChange: (value: QRStatus | "all") => void
+  trash?: boolean
+  onTrashChange?: (value: boolean) => void
 }
 
 const typeLabels: Record<string, string> = {
@@ -37,6 +41,8 @@ export function QRListFilters({
   onTypeChange,
   status = "all",
   onStatusChange,
+  trash = false,
+  onTrashChange,
 }: QRListFiltersProps) {
   return (
     <div className="flex flex-wrap gap-3">
@@ -76,6 +82,15 @@ export function QRListFilters({
           <SelectItem value="PAUSED">En pause</SelectItem>
         </SelectContent>
       </Select>
+      {onTrashChange && (
+        <Button
+          variant={trash ? "default" : "outline"}
+          size="sm"
+          onClick={() => onTrashChange(!trash)}
+        >
+          {trash ? "Corbeille" : "Corbeille"}
+        </Button>
+      )}
     </div>
   )
 }

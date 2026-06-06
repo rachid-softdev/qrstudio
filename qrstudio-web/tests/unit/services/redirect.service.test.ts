@@ -13,6 +13,7 @@ function makeQR(overrides: { type: QRType; destinationUrl?: string | null; short
     type: overrides.type,
     status: "ACTIVE" as const,
     metadata,
+    deletedAt: null,
   }
 }
 
@@ -55,5 +56,11 @@ describe("resolveDestination", () => {
   it("TEXT type should return /view/[shortCode]", () => {
     const result = resolveDestination(makeQR({ type: "TEXT", shortCode: "txt123" }))
     expect(result).toBe("/view/txt123")
+  })
+
+  it("should return /qr-deleted when deletedAt is set", () => {
+    const qr = { ...makeQR({ type: "URL", destinationUrl: "https://example.com" }), deletedAt: new Date() }
+    const result = resolveDestination(qr)
+    expect(result).toBe("/qr-deleted")
   })
 })

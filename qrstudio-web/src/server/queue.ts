@@ -14,4 +14,5 @@ export const QUEUE_NAMES = {
   RECORD_SCAN: "record-scan",
   AGGREGATE_SCANS: "aggregate-scans",
   RETENTION_CLEANUP: "retention-cleanup",
+  CLEANUP_TRASH: "cleanup-trash",
 } as const
