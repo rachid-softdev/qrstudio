@@ -12,6 +12,9 @@ export async function register() {
 
     const { startRetentionCleanupWorker } = await import("@/server/workers/retention-cleanup.worker")
     await startRetentionCleanupWorker()
+
+    const { startCleanupTrashWorker } = await import("@/server/workers/cleanup-trash.worker")
+    await startCleanupTrashWorker()
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {

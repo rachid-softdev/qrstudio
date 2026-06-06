@@ -6,7 +6,7 @@ import { qrService } from "@/server/services/qr.service"
 import { analyticsService } from "@/server/services/analytics.service"
 import { QRCreateSchema, QRUpdateSchema } from "@/lib/validations"
 import { generateQRSvg, generateQrPngBuffer, generateQrPdfBuffer } from "@/lib/qr-generator"
-import type { QRStatus } from "@prisma/client"
+import type { Plan, QRStatus } from "@prisma/client"
 
 const QRTypeEnum = z.enum(['URL','WHATSAPP','WIFI','VCARD','PDF','TEXT','LANDING_PAGE'])
 const QRStatusEnum = z.enum(['ACTIVE','PAUSED'])
@@ -26,11 +26,12 @@ export const qrRouter = router({
         type: QRTypeEnum.optional(),
         search: z.string().optional(),
         status: QRStatusEnum.optional(),
+        trash: z.boolean().optional().default(false),
       })
     )
     .query(async ({ ctx, input }) => {
       await workspaceQuery(ctx, input.workspaceId)
-      const where: Record<string, unknown> = { workspaceId: input.workspaceId }
+      const where: Record<string, unknown> = { workspaceId: input.workspaceId, deletedAt: input.trash ? { not: null } : null }
       if (input.type) where.type = input.type
       if (input.status) where.status = input.status
       if (input.search) {
@@ -124,27 +125,34 @@ export const qrRouter = router({
   delete: workspaceProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await prisma.qRCode.findFirst({
-        where: { id: input.id, workspaceId: input.workspaceId },
-      })
-
-      if (!existing) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
+      const workspace = await workspaceQuery(ctx, input.workspaceId)
+      if (workspace.role !== 'OWNER') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut supprimer un QR code' })
       }
+      await qrService.softDelete(input.id, input.workspaceId)
+      return { success: true }
+    }),
 
-      const workspaceOwner = await prisma.workspace.findUnique({
-        where: { id: input.workspaceId },
-        select: { ownerId: true },
-      })
-
-      if (workspaceOwner?.ownerId !== ctx.user!.id) {
-        const workspace = await workspaceQuery(ctx, input.workspaceId)
-        if (workspace.role !== 'OWNER') {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut supprimer un QR code' })
-        }
+  restore: workspaceProcedure
+    .input(z.object({ id: z.string(), workspaceId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const workspace = await workspaceQuery(ctx, input.workspaceId)
+      if (workspace.role !== 'OWNER') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut restaurer un QR code' })
       }
+      await qrService.checkPlanLimit(input.workspaceId, ctx.user.plan as Plan)
+      await qrService.restore(input.id, input.workspaceId)
+      return { success: true }
+    }),
 
-      await prisma.qRCode.delete({ where: { id: input.id } })
+  permanentDelete: workspaceProcedure
+    .input(z.object({ id: z.string(), workspaceId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const workspace = await workspaceQuery(ctx, input.workspaceId)
+      if (workspace.role !== 'OWNER') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut supprimer définitivement un QR code' })
+      }
+      await qrService.permanentDelete(input.id, input.workspaceId)
       return { success: true }
     }),
 

@@ -5,9 +5,14 @@ export interface QRCodeRecord {
   type: QRType
   status: QRStatus
   metadata: unknown
+  deletedAt: Date | null
 }
 
 export function resolveDestination(qrCode: QRCodeRecord): string {
+  if (qrCode.deletedAt) {
+    return '/qr-deleted'
+  }
+
   const metadata = (qrCode.metadata as Record<string, unknown>) ?? {}
   const destinationUrl = (metadata.destinationUrl as string | undefined) ?? null
 

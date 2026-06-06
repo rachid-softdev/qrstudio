@@ -24,6 +24,11 @@ export async function GET(
       return NextResponse.redirect(new URL("/qr-not-found", request.url), 301)
     }
 
+    // Vérifier la corbeille AVANT le statut PAUSED
+    if (qrCode.deletedAt) {
+      return NextResponse.redirect(new URL("/qr-deleted", request.url), 301)
+    }
+
     if (qrCode.status === "PAUSED") {
       return NextResponse.redirect(new URL("/qr-paused", request.url), 301)
     }
@@ -33,6 +38,7 @@ export async function GET(
       type: qrCode.type,
       status: qrCode.status,
       metadata: qrCode.metadata,
+      deletedAt: qrCode.deletedAt,
     })
 
     const ip =

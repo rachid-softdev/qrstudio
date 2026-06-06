@@ -4,7 +4,7 @@ import type { Plan } from "@prisma/client"
 import type { QRCreateInput } from "@/lib/validations"
 
 const prismaMock = vi.hoisted(() => {
-  const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "count"]) => {
+  const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "deleteMany", "count"]) => {
     const m: Record<string, ReturnType<typeof vi.fn>> = {}
     for (const method of methods) {
       m[method] = vi.fn()
@@ -533,6 +533,117 @@ describe("qrService", () => {
 
       const result = await qrService.update("qr-1", "ws-1", { frameLabel: "Scan me!" })
       expect(result.svgContent).toBe("<svg></svg>")
+    })
+  })
+
+  // ──────────────────────────────────────────────
+  // softDelete
+  // ──────────────────────────────────────────────
+  describe("softDelete", () => {
+    it("should mark qrCode with deletedAt", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1", deletedAt: null } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      await qrService.softDelete("qr-1", "ws-1")
+
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-1" },
+        data: { deletedAt: expect.any(Date) },
+      })
+    })
+
+    it("should be idempotent (calling twice on already-trashed code does not error)", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1", deletedAt: new Date() } as never)
+
+      await expect(qrService.softDelete("qr-1", "ws-1")).resolves.toBeUndefined()
+      expect(prismaMock.qRCode.update).not.toHaveBeenCalled()
+    })
+
+    it("should throw NOT_FOUND for non-existent qrCode", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrService.softDelete("nonexistent", "ws-1"))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+  })
+
+  // ──────────────────────────────────────────────
+  // restore
+  // ──────────────────────────────────────────────
+  describe("restore", () => {
+    it("should clear deletedAt on a trashed qrCode", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1", deletedAt: new Date() } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      await qrService.restore("qr-1", "ws-1")
+
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-1" },
+        data: { deletedAt: null },
+      })
+    })
+
+    it("should throw NOT_FOUND for non-existent qrCode", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrService.restore("nonexistent", "ws-1"))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should throw NOT_FOUND for non-trashed qrCode (deletedAt null — Prisma returns null because WHERE deletedAt IS NOT NULL)", async () => {
+      // The service queries with `where: { deletedAt: { not: null } }` so Prisma returns null
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrService.restore("qr-1", "ws-1"))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+  })
+
+  // ──────────────────────────────────────────────
+  // permanentDelete
+  // ──────────────────────────────────────────────
+  describe("permanentDelete", () => {
+    it("should hard delete a trashed qrCode from DB", async () => {
+      prismaMock.qRCode.deleteMany.mockResolvedValue({ count: 1 })
+
+      await qrService.permanentDelete("qr-1", "ws-1")
+
+      expect(prismaMock.qRCode.deleteMany).toHaveBeenCalledWith({
+        where: { id: "qr-1", workspaceId: "ws-1", deletedAt: { not: null } },
+      })
+    })
+
+    it("should throw NOT_FOUND for non-existent qrCode", async () => {
+      prismaMock.qRCode.deleteMany.mockResolvedValue({ count: 0 })
+
+      await expect(qrService.permanentDelete("nonexistent", "ws-1"))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should throw NOT_FOUND for non-trashed qrCode (deletedAt null)", async () => {
+      prismaMock.qRCode.deleteMany.mockResolvedValue({ count: 0 })
+
+      await expect(qrService.permanentDelete("qr-1", "ws-1"))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+  })
+
+  // ── additional checkPlanLimit tests ──
+  describe("checkPlanLimit (soft-delete integration)", () => {
+    const workspaceId = "ws-1"
+
+    it("should exclude soft-deleted codes from count (5 active + 2 trashed → count returns 5, PRO limit is 100)", async () => {
+      prismaMock.qRCode.count.mockResolvedValue(5)
+      await expect(qrService.checkPlanLimit(workspaceId, "PRO" as Plan)).resolves.toBeUndefined()
+      expect(prismaMock.qRCode.count).toHaveBeenCalledWith({
+        where: { workspaceId, deletedAt: null },
+      })
+    })
+
+    it("should still throw FORBIDDEN when active count >= limit for FREE (5 >= 5)", async () => {
+      prismaMock.qRCode.count.mockResolvedValue(5)
+      await expect(qrService.checkPlanLimit(workspaceId, "FREE" as Plan))
+        .rejects.toMatchObject({ code: "FORBIDDEN" })
     })
   })
 })

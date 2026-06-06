@@ -7,6 +7,7 @@ interface UseQRListFilters {
   status?: QRStatus
   search?: string
   limit?: number
+  trash?: boolean
 }
 
 export function useQRList(filters: UseQRListFilters) {
@@ -18,6 +19,7 @@ export function useQRList(filters: UseQRListFilters) {
         type: filters.type,
         status: filters.status,
         search: filters.search,
+        trash: filters.trash ?? false,
       },
       {
         getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,

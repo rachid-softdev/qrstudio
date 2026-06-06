@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { TRPCContext } from "@/server/trpc"
 
 const prismaMock = vi.hoisted(() => {
-  const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "count"]) => {
+  const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "deleteMany", "count"]) => {
     const m: Record<string, ReturnType<typeof vi.fn>> = {}
     for (const method of methods) {
       m[method] = vi.fn()
@@ -16,7 +16,7 @@ const prismaMock = vi.hoisted(() => {
     scan: model(["findUnique", "findFirst", "findMany", "create", "update", "count", "groupBy"]),
     landingPage: model(["findUnique", "findFirst", "create", "update"]),
     user: model(),
-    scanDaily: model(["findUnique", "findFirst", "findMany", "create", "update", "delete", "count", "groupBy"]),
+    scanDaily: model(["findUnique", "findFirst", "findMany", "create", "update", "delete", "deleteMany", "count", "groupBy"]),
     $queryRaw: vi.fn(),
   }
 })
@@ -189,6 +189,33 @@ describe("qrRouter", () => {
 
       await expect(qrRouter.createCaller(authed("user-other")).list({ workspaceId: "ws-other" }))
         .rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+
+    it("should exclude trashed codes by default (trash not specified → deletedAt: null)", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([] as never)
+
+      await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1" })
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.deletedAt).toBe(null)
+    })
+
+    it("should exclude trashed codes when trash=false", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([] as never)
+
+      await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1", trash: false })
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.deletedAt).toBe(null)
+    })
+
+    it("should show only trashed codes when trash=true (deletedAt: { not: null })", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findMany.mockResolvedValue([] as never)
+
+      await qrRouter.createCaller(authed()).list({ workspaceId: "ws-1", trash: true })
+      const findManyCall = prismaMock.qRCode.findMany.mock.calls[0][0]
+      expect(findManyCall.where.deletedAt).toEqual({ not: null })
     })
   })
 
@@ -403,23 +430,82 @@ describe("qrRouter", () => {
   })
 
   describe("delete", () => {
-    it("should allow OWNER to delete", async () => {
+    it("should soft-delete (set deletedAt) when OWNER deletes", async () => {
       mockWorkspaceAccess()
-      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
-      prismaMock.workspace.findUnique.mockResolvedValue({ ownerId: "user-1" } as never)
-      prismaMock.qRCode.delete.mockResolvedValue({} as never)
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1", deletedAt: null } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
 
       const result = await qrRouter.createCaller(authed()).delete({ id: "qr-1", workspaceId: "ws-1" })
       expect(result).toEqual({ success: true })
+      // Verify softDelete was called → update with deletedAt
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-1" },
+        data: { deletedAt: expect.any(Date) },
+      })
     })
 
     it("should throw FORBIDDEN if VIEWER tries to delete", async () => {
       mockWorkspaceAccess("ws-1", "VIEWER")
       prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1" } as never)
-      prismaMock.workspace.findUnique.mockResolvedValue({ ownerId: "other-user" } as never)
 
       await expect(qrRouter.createCaller(authed("user-2", "ws-1")).delete({ id: "qr-1", workspaceId: "ws-1" }))
         .rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+
+    it("should throw NOT_FOUND for non-existent qrCode", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrRouter.createCaller(authed()).delete({ id: "nonexistent", workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+  })
+
+  describe("restore", () => {
+    it("should restore a trashed qrCode (deletedAt becomes null)", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.count.mockResolvedValue(0)
+      prismaMock.qRCode.findFirst.mockResolvedValue({ id: "qr-1", workspaceId: "ws-1", deletedAt: new Date() } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      const result = await qrRouter.createCaller(authed()).restore({ id: "qr-1", workspaceId: "ws-1" })
+      expect(result).toEqual({ success: true })
+      expect(prismaMock.qRCode.count).toHaveBeenCalledWith({
+        where: { workspaceId: "ws-1", deletedAt: null },
+      })
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-1" },
+        data: { deletedAt: null },
+      })
+    })
+
+    it("should throw NOT_FOUND for non-existent qrCode", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrRouter.createCaller(authed()).restore({ id: "nonexistent", workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+  })
+
+  describe("permanentDelete", () => {
+    it("should permanently delete a trashed qrCode", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.deleteMany.mockResolvedValue({ count: 1 })
+
+      const result = await qrRouter.createCaller(authed()).permanentDelete({ id: "qr-1", workspaceId: "ws-1" })
+      expect(result).toEqual({ success: true })
+      expect(prismaMock.qRCode.deleteMany).toHaveBeenCalledWith({
+        where: { id: "qr-1", workspaceId: "ws-1", deletedAt: { not: null } },
+      })
+    })
+
+    it("should throw NOT_FOUND for non-existent qrCode", async () => {
+      mockWorkspaceAccess()
+      prismaMock.qRCode.deleteMany.mockResolvedValue({ count: 0 })
+
+      await expect(qrRouter.createCaller(authed()).permanentDelete({ id: "nonexistent", workspaceId: "ws-1" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
     })
   })
 
