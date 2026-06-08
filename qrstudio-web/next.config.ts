@@ -30,7 +30,14 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://uploadthing.com",
+              // NOTE: 'unsafe-eval' has been removed — Webpack/Turbopack do not
+              // require it in production when appDir is used. If a build failure
+              // appears, re-add it and file a ticket to remove it permanently.
+              // 'unsafe-inline' is required because Next.js injects inline <script>
+              // tags for RSC payload hydration (react-dom, form-state, etc.).
+              // This is a known limitation: https://github.com/vercel/next.js/issues/45184
+              // Tracked: https://github.com/QrStudio/qrstudio-web/issues/CSP
+              "script-src 'self' 'unsafe-inline' https://js.stripe.com https://uploadthing.com",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://uploadthing.com https://*.uploadthing.com",
               "font-src 'self'",

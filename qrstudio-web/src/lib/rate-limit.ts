@@ -19,3 +19,17 @@ export const authRateLimit = new Ratelimit({
   analytics: true,
   prefix: "@upstash/ratelimit/auth",
 })
+
+export const trpcMutationLimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(60, "60 s"),
+  analytics: true,
+  prefix: "@upstash/ratelimit/trpc/mutation",
+})
+
+export const trpcQueryLimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(300, "60 s"),
+  analytics: true,
+  prefix: "@upstash/ratelimit/trpc/query",
+})
