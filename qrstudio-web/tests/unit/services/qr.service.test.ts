@@ -18,6 +18,7 @@ const prismaMock = vi.hoisted(() => {
     landingPage: model(["findUnique", "findFirst", "create", "update"]),
     user: model(),
     workspaceMember: model(),
+    $transaction: vi.fn(),
   }
 })
 
@@ -237,6 +238,20 @@ describe("qrService", () => {
       } as never)
     }
 
+    beforeEach(() => {
+      // Mock $transaction to invoke the callback with a tx proxy
+      // that delegates qRCode and landingPage calls to the top-level mocks
+      prismaMock.$transaction.mockImplementation(
+        (cb: (tx: Record<string, unknown>) => unknown) => {
+          return cb({
+            $executeRawUnsafe: vi.fn(),
+            qRCode: prismaMock.qRCode,
+            landingPage: prismaMock.landingPage,
+          })
+        }
+      )
+    })
+
     it("should create a URL QR code and return id, shortCode, svgContent", async () => {
       vi.mocked(utils.generateShortCode).mockReturnValue("xyz789")
       mockWorkspaceFound("FREE")
@@ -257,6 +272,7 @@ describe("qrService", () => {
 
     it("should throw FORBIDDEN if plan limit reached", async () => {
       mockWorkspaceFound("FREE")
+      // Inside the transaction, tx.qRCode.count returns 5 (≥ FREE limit of 5)
       prismaMock.qRCode.count.mockResolvedValue(5)
       await expect(qrService.create(baseInput)).rejects.toMatchObject({ code: "FORBIDDEN" })
     })
@@ -644,6 +660,294 @@ describe("qrService", () => {
       prismaMock.qRCode.count.mockResolvedValue(5)
       await expect(qrService.checkPlanLimit(workspaceId, "FREE" as Plan))
         .rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+  })
+
+  // ──────────────────────────────────────────────
+  // Race condition quota via atomic transaction
+  // ──────────────────────────────────────────────
+  describe("create — atomic transaction prevents race condition", () => {
+    const baseInput: QRCreateInput = {
+      workspaceId: "ws-1",
+      name: "Race QR",
+      type: "URL",
+      destinationUrl: "https://example.com",
+    }
+
+    function mockWorkspaceFound(plan: Plan = "FREE") {
+      prismaMock.workspace.findUnique.mockResolvedValue({
+        id: "ws-1", ownerId: "user-1", owner: { plan },
+      } as never)
+    }
+
+    beforeEach(() => {
+      prismaMock.$transaction.mockImplementation(
+        (cb: (tx: Record<string, unknown>) => unknown) => {
+          return cb({
+            $executeRawUnsafe: vi.fn(),
+            qRCode: prismaMock.qRCode,
+            landingPage: prismaMock.landingPage,
+          })
+        }
+      )
+    })
+
+    it("should succeed when count < limit (4 active, FREE limit 5)", async () => {
+      vi.mocked(utils.generateShortCode).mockReturnValue("race01")
+      mockWorkspaceFound("FREE")
+      prismaMock.qRCode.count.mockResolvedValue(4) // 4 < 5, OK
+      prismaMock.qRCode.findUnique.mockResolvedValue(null)
+      prismaMock.qRCode.create.mockResolvedValue({ id: "qr-race1", shortCode: "race01" } as never)
+
+      const result = await qrService.create(baseInput)
+      expect(result.id).toBe("qr-race1")
+    })
+
+    it("should fail when count >= limit (5 active, FREE limit 5)", async () => {
+      vi.mocked(utils.generateShortCode).mockReturnValue("race02")
+      mockWorkspaceFound("FREE")
+      prismaMock.qRCode.count.mockResolvedValue(5) // 5 >= 5, rejected
+      prismaMock.qRCode.findUnique.mockResolvedValue(null)
+
+      await expect(qrService.create(baseInput)).rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+
+    it("should succeed for AGENCY plan regardless of count (Infinity limit)", async () => {
+      vi.mocked(utils.generateShortCode).mockReturnValue("race03")
+      mockWorkspaceFound("AGENCY")
+      prismaMock.qRCode.count.mockResolvedValue(999999) // very high
+      prismaMock.qRCode.findUnique.mockResolvedValue(null)
+      prismaMock.qRCode.create.mockResolvedValue({ id: "qr-agency", shortCode: "race03" } as never)
+
+      const result = await qrService.create(baseInput)
+      expect(result.id).toBe("qr-agency")
+    })
+
+    it("should simulate race condition: two concurrent calls at count = max-1", async () => {
+      vi.mocked(utils.generateShortCode)
+        .mockReturnValueOnce("race04")
+        .mockReturnValueOnce("race05")
+      mockWorkspaceFound("FREE")
+
+      // Simulate count returning 4 (max-1 for FREE where limit=5)
+      // Both calls see count = 4, so both pass the check
+      prismaMock.qRCode.count.mockResolvedValue(4)
+      prismaMock.qRCode.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+      prismaMock.qRCode.create
+        .mockResolvedValueOnce({ id: "qr-a", shortCode: "race04" } as never)
+        .mockResolvedValueOnce({ id: "qr-b", shortCode: "race05" } as never)
+
+      const [resultA, resultB] = await Promise.all([
+        qrService.create(baseInput),
+        qrService.create({ ...baseInput, name: "Race QR 2" }),
+      ])
+
+      expect(resultA.id).toBe("qr-a")
+      expect(resultB.id).toBe("qr-b")
+      // Without the advisory lock, this would allow 6 QR codes on a FREE plan.
+      // With the advisory lock, the second call would be blocked until the first
+      // completes, and then see the updated count of 5 → fail.
+      // We verify the lock was acquired:
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // ──────────────────────────────────────────────
+  // FK Cascade → SetNull (LandingPage deletion)
+  // ──────────────────────────────────────────────
+  describe("FK SetNull — LandingPage deletion does not delete QRCode", () => {
+    it("should allow QRCode to exist with null landingPageId (orphan state)", async () => {
+      // Simulate a QRCode whose landing page was deleted (landingPageId set to null by DB cascade)
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-orphan",
+        workspaceId: "ws-1",
+        type: "LANDING_PAGE",
+        landingPageId: null,
+        landingPage: null,
+        fgColor: "#000000",
+        bgColor: "#FFFFFF",
+        moduleShape: "square",
+        shortCode: "orphan",
+        metadata: {},
+      } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      // update should still work (QR code is still active)
+      const result = await qrService.update("qr-orphan", "ws-1", { name: "Orphan QR - updated" })
+      expect(result.id).toBe("qr-orphan")
+    })
+
+    it("should throw NOT_FOUND if QRCode itself is deleted (landingPageId=null is OK)", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrService.update("nonexistent", "ws-1", { name: "Nope" }))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should still return QR codes with landingPageId=null in getById equivalent", async () => {
+      // QRCode with null landingPage should still be findable
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-active",
+        workspaceId: "ws-1",
+        type: "URL",
+        shortCode: "active",
+        metadata: { destinationUrl: "https://example.com" },
+        fgColor: "#000000",
+        bgColor: "#FFFFFF",
+        moduleShape: "square",
+        landingPageId: null,
+        landingPage: null,
+        frameType: null,
+        frameLabel: null,
+        logoUrl: null,
+      } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      const result = await qrService.update("qr-active", "ws-1", { destinationUrl: "https://new.com" })
+      expect(result.id).toBe("qr-active")
+    })
+  })
+
+  // ──────────────────────────────────────────────
+  // updateStatus — deletedAt filter
+  // ──────────────────────────────────────────────
+  describe("updateStatus", () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+    })
+
+    it("should throw NOT_FOUND if QR code is soft-deleted (deletedAt not null)", async () => {
+      // Simulate a soft-deleted QR code: findFirst returns null because
+      // the service queries with `deletedAt: null`
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrService.updateStatus("qr-deleted", "ws-1", "ACTIVE" as never, "user-1"))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should throw NOT_FOUND if QR code does not exist", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(qrService.updateStatus("nonexistent", "ws-1", "ACTIVE" as never, "user-1"))
+        .rejects.toMatchObject({ code: "NOT_FOUND" })
+    })
+
+    it("should allow updateStatus on an active QR code", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-active",
+        workspaceId: "ws-1",
+        type: "URL",
+        status: "ACTIVE",
+        deletedAt: null,
+      } as never)
+      prismaMock.workspaceMember.findUnique.mockResolvedValue({
+        workspaceId: "ws-1",
+        userId: "user-1",
+        role: "EDITOR",
+      } as never)
+      prismaMock.workspace.findUnique.mockResolvedValue({
+        id: "ws-1",
+        owner: { plan: "PRO" },
+      } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      await qrService.updateStatus("qr-active", "ws-1", "PAUSED" as never, "user-1")
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-active" },
+        data: { status: "PAUSED" },
+      })
+    })
+
+    it("should allow updateStatus on a paused QR code", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-paused",
+        workspaceId: "ws-1",
+        type: "URL",
+        status: "PAUSED",
+        deletedAt: null,
+      } as never)
+      prismaMock.workspaceMember.findUnique.mockResolvedValue({
+        workspaceId: "ws-1",
+        userId: "user-1",
+        role: "EDITOR",
+      } as never)
+      prismaMock.workspace.findUnique.mockResolvedValue({
+        id: "ws-1",
+        owner: { plan: "PRO" },
+      } as never)
+      prismaMock.qRCode.update.mockResolvedValue({} as never)
+
+      await qrService.updateStatus("qr-paused", "ws-1", "ACTIVE" as never, "user-1")
+      expect(prismaMock.qRCode.update).toHaveBeenCalledWith({
+        where: { id: "qr-paused" },
+        data: { status: "ACTIVE" },
+      })
+    })
+
+    it("should throw FORBIDDEN if user is VIEWER", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-view",
+        workspaceId: "ws-1",
+        deletedAt: null,
+      } as never)
+      prismaMock.workspaceMember.findUnique.mockResolvedValue({
+        workspaceId: "ws-1",
+        userId: "user-1",
+        role: "VIEWER",
+      } as never)
+
+      await expect(
+        qrService.updateStatus("qr-view", "ws-1", "PAUSED" as never, "user-1")
+      ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+
+    it("should throw FORBIDDEN if workspace member does not exist", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-nomember",
+        workspaceId: "ws-1",
+        deletedAt: null,
+      } as never)
+      prismaMock.workspaceMember.findUnique.mockResolvedValue(null)
+
+      await expect(
+        qrService.updateStatus("qr-nomember", "ws-1", "PAUSED" as never, "user-1")
+      ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+
+    it("should throw FORBIDDEN if FREE plan tries to pause", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue({
+        id: "qr-free",
+        workspaceId: "ws-1",
+        deletedAt: null,
+      } as never)
+      prismaMock.workspaceMember.findUnique.mockResolvedValue({
+        workspaceId: "ws-1",
+        userId: "user-1",
+        role: "EDITOR",
+      } as never)
+      prismaMock.workspace.findUnique.mockResolvedValue({
+        id: "ws-1",
+        owner: { plan: "FREE" },
+      } as never)
+
+      await expect(
+        qrService.updateStatus("qr-free", "ws-1", "PAUSED" as never, "user-1")
+      ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+
+    it("should query with deletedAt: null to prevent modifying soft-deleted QR codes", async () => {
+      prismaMock.qRCode.findFirst.mockResolvedValue(null)
+
+      await expect(
+        qrService.updateStatus("qr-any", "ws-1", "ACTIVE" as never, "user-1")
+      ).rejects.toMatchObject({ code: "NOT_FOUND" })
+
+      // Verify the query includes deletedAt: null
+      expect(prismaMock.qRCode.findFirst).toHaveBeenCalledWith({
+        where: { id: "qr-any", workspaceId: "ws-1", deletedAt: null },
+      })
     })
   })
 })

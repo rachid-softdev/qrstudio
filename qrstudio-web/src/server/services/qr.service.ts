@@ -42,6 +42,18 @@ function toMetadata(input: { destinationUrl?: string | null; wifi?: Record<strin
 }
 
 export const qrService = {
+  /**
+   * Vérifie si le workspace a atteint sa limite de QR codes.
+   *
+   * ATTENTION: Cette méthode seule a une race condition (TOCTOU) si deux
+   * requêtes l'appellent simultanément. Pour les créations, utiliser la
+   * transaction atomique dans create() qui combine check + create avec
+   * un advisory lock PostgreSQL.
+   *
+   * Pour les opérations non-critiques (restore), cette vérification simple
+   * est acceptable car le restore ne crée pas de nouveau QR code — il
+   * réactive un existant qui avait déjà été compté.
+   */
   async checkPlanLimit(workspaceId: string, ownerPlan: Plan): Promise<void> {
     const planKey = ownerPlan as PlanKey
     const limit = PLAN_LIMITS[planKey].maxQRCodes
@@ -75,8 +87,6 @@ export const qrService = {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Espace de travail introuvable' })
     }
 
-    await qrService.checkPlanLimit(data.workspaceId, workspace.owner.plan)
-
     const shortCode = await qrService.generateUniqueShortCode()
 
     let landingPageId: string | undefined
@@ -106,21 +116,49 @@ export const qrService = {
       frameLabel: data.frameLabel,
     })
 
-    const qrCode = await prisma.qRCode.create({
-      data: {
-        workspaceId: data.workspaceId,
-        shortCode,
-        name: data.name,
-        type: data.type as QRType,
-        metadata: toMetadata(data) as Prisma.InputJsonValue,
-        landingPageId: landingPageId ?? null,
-        fgColor: data.fgColor ?? '#000000',
-        bgColor: data.bgColor ?? '#FFFFFF',
-        logoUrl: data.logoUrl ?? null,
-        moduleShape: data.moduleShape ?? 'square',
-        frameType: data.frameType ?? null,
-        frameLabel: data.frameLabel ?? null,
-      },
+    // Transaction atomique avec advisory lock PostgreSQL :
+    // Évite la race condition entre le checkPlanLimit (count) et la création.
+    // Sans ce lock, deux requêtes simultanées pourraient toutes deux passer
+    // le checkPlanLimit et créer des QR codes au-delà de la limite.
+    const qrCode = await prisma.$transaction(async (tx) => {
+      // Acquérir un lock exclusif pour ce workspace
+      // pg_advisory_xact_lock se libère automatiquement à la fin de la transaction
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtext('workspace_' || $1))`,
+        data.workspaceId,
+      )
+
+      // Vérifier la limite à l'intérieur du lock
+      const planKey = workspace.owner.plan as PlanKey
+      const limit = PLAN_LIMITS[planKey].maxQRCodes
+      if (limit !== Infinity) {
+        const count = await tx.qRCode.count({
+          where: { workspaceId: data.workspaceId, deletedAt: null },
+        })
+        if (count >= limit) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: `Limite de ${limit} QR codes atteinte pour votre plan. Passez au plan supérieur.`,
+          })
+        }
+      }
+
+      return await tx.qRCode.create({
+        data: {
+          workspaceId: data.workspaceId,
+          shortCode,
+          name: data.name,
+          type: data.type as QRType,
+          metadata: toMetadata(data) as Prisma.InputJsonValue,
+          landingPageId: landingPageId ?? null,
+          fgColor: data.fgColor ?? '#000000',
+          bgColor: data.bgColor ?? '#FFFFFF',
+          logoUrl: data.logoUrl ?? null,
+          moduleShape: data.moduleShape ?? 'square',
+          frameType: data.frameType ?? null,
+          frameLabel: data.frameLabel ?? null,
+        },
+      })
     })
 
     return { id: qrCode.id, shortCode: qrCode.shortCode, svgContent }
@@ -225,8 +263,10 @@ export const qrService = {
   },
 
   async updateStatus(id: string, workspaceId: string, status: QRStatus, userId: string): Promise<void> {
+    // SÉCURITÉ : filtrer les QR codes soft-deleted (deletedAt !== null)
+    // pour éviter de modifier le statut d'un élément dans la corbeille
     const existing = await prisma.qRCode.findFirst({
-      where: { id, workspaceId },
+      where: { id, workspaceId, deletedAt: null },
     })
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
@@ -280,6 +320,27 @@ export const qrService = {
     })
     if (!qrCode) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable dans la corbeille' })
+    }
+
+    // Vérifier le quota avant restauration
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { owner: { select: { plan: true } } },
+    })
+    if (workspace) {
+      const planKey = workspace.owner.plan as PlanKey
+      const limit = PLAN_LIMITS[planKey].maxQRCodes
+      if (limit !== Infinity) {
+        const count = await prisma.qRCode.count({
+          where: { workspaceId, deletedAt: null },
+        })
+        if (count >= limit) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Impossible de restaurer : limite de QR codes atteinte',
+          })
+        }
+      }
     }
 
     await prisma.qRCode.update({

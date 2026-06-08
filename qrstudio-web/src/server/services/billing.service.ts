@@ -5,7 +5,6 @@ import { withRetry } from "@/lib/retry"
 import logger from "@/lib/logger"
 import * as Sentry from "@sentry/nextjs"
 import type { Plan } from "@/types/index"
-import { hasEventBeenProcessed, markEventProcessed } from "./stripe-idempotency"
 
 function getStripe(): Stripe {
   const secretKey = process.env.STRIPE_SECRET_KEY
@@ -155,76 +154,84 @@ export const billingService = {
   },
 
   async handleWebhookEvent(event: Stripe.Event) {
-    // Idempotency check
-    if (await hasEventBeenProcessed(event.id)) {
-      return { skipped: true }
-    }
+    return prisma.$transaction(async (tx) => {
+      // Idempotency check — inside the transaction
+      const existing = await tx.webhookEvent.findUnique({
+        where: { id: event.id },
+      })
+      if (existing) {
+        return { skipped: true }
+      }
 
-    try {
-      switch (event.type) {
-        case "checkout.session.completed": {
-          const session = event.data.object as Stripe.Checkout.Session
-          const userId = session.metadata?.userId
-          const plan = session.metadata?.plan as Plan | undefined
+      try {
+        switch (event.type) {
+          case "checkout.session.completed": {
+            const session = event.data.object as Stripe.Checkout.Session
+            const userId = session.metadata?.userId
+            const plan = session.metadata?.plan as Plan | undefined
 
-          if (!userId || !plan) break
+            if (!userId || !plan) break
 
-          await prisma.user.update({
-            where: { id: userId },
-            data: {
-              plan,
-              stripeSubscriptionId: session.subscription as string,
-            },
-          })
-          break
-        }
+            await tx.user.update({
+              where: { id: userId },
+              data: {
+                plan,
+                stripeSubscriptionId: session.subscription as string,
+              },
+            })
+            break
+          }
 
-        case "customer.subscription.updated": {
-          const subscription = event.data.object as Stripe.Subscription
-          let userId = subscription.metadata?.userId
+          case "customer.subscription.updated": {
+            const subscription = event.data.object as Stripe.Subscription
+            let userId = subscription.metadata?.userId
 
-          if (!userId) {
-            const user = await prisma.user.findFirst({
+            if (!userId) {
+              const user = await tx.user.findFirst({
+                where: { stripeSubscriptionId: subscription.id },
+                select: { id: true },
+              })
+              if (!user) break
+              userId = user.id
+            }
+
+            const plan = mapStripePlanToPlan(subscription.items.data[0]?.price.id ?? "")
+            await tx.user.update({
+              where: { id: userId },
+              data: { plan },
+            })
+            break
+          }
+
+          case "customer.subscription.deleted": {
+            const subscription = event.data.object as Stripe.Subscription
+            const user = await tx.user.findFirst({
               where: { stripeSubscriptionId: subscription.id },
               select: { id: true },
             })
+
             if (!user) break
-            userId = user.id
+
+            await tx.user.update({
+              where: { id: user.id },
+              data: {
+                plan: "FREE",
+                stripeSubscriptionId: null,
+              },
+            })
+            break
           }
-
-          const plan = mapStripePlanToPlan(subscription.items.data[0]?.price.id ?? "")
-          await prisma.user.update({
-            where: { id: userId },
-            data: { plan },
-          })
-          break
         }
 
-        case "customer.subscription.deleted": {
-          const subscription = event.data.object as Stripe.Subscription
-          const user = await prisma.user.findFirst({
-            where: { stripeSubscriptionId: subscription.id },
-            select: { id: true },
-          })
-
-          if (!user) break
-
-          await prisma.user.update({
-            where: { id: user.id },
-            data: {
-              plan: "FREE",
-              stripeSubscriptionId: null,
-            },
-          })
-          break
-        }
+        // Mark event as processed within the same transaction
+        await tx.webhookEvent.create({
+          data: { id: event.id, type: event.type },
+        })
+      } catch (error) {
+        Sentry.captureException(error)
+        throw error
       }
-
-      await markEventProcessed(event.id, event.type)
-    } catch (error) {
-      Sentry.captureException(error)
-      throw error
-    }
+    })
   },
 }
 
