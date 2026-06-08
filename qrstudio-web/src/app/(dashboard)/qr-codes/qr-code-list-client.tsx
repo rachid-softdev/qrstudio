@@ -54,12 +54,7 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
 
   const utils = api.useUtils()
 
-  const deleteMutation = api.qr.delete.useMutation({
-    onSuccess: () => {
-      utils.qr.list.invalidate()
-      toast.success("QR code déplacé dans la corbeille")
-    },
-  })
+  const deleteMutation = api.qr.delete.useMutation()
 
   const restoreMutation = api.qr.restore.useMutation({
     onSuccess: () => {
@@ -83,9 +78,22 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
 
   const handleDelete = useCallback(
     (id: string) => {
-      deleteMutation.mutate({ id, workspaceId })
+      deleteMutation.mutate({ id, workspaceId }, {
+        onSuccess: () => {
+          utils.qr.list.invalidate()
+          toast("QR code déplacé dans la corbeille", {
+            action: {
+              label: "Annuler",
+              onClick: () => {
+                restoreMutation.mutate({ id, workspaceId })
+              },
+            },
+            duration: 5000,
+          })
+        },
+      })
     },
-    [deleteMutation, workspaceId],
+    [deleteMutation, restoreMutation, utils, workspaceId],
   )
 
   const handleRestore = useCallback(
