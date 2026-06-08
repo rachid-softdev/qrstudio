@@ -2,6 +2,18 @@ import * as Sentry from "@sentry/nextjs"
 import { Resend } from "resend"
 import logger from "@/lib/logger"
 
+/**
+ * Escape HTML special characters to prevent XSS in email templates.
+ */
+export function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
 function createResendClient(): Resend | null {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
@@ -54,7 +66,7 @@ export const emailService = {
         to: email,
         subject: "Bienvenue sur QR Studio 🎉",
         html: wrapHtml(`
-          <h1>Bienvenue ${name} !</h1>
+          <h1>Bienvenue ${escapeHtml(name)} !</h1>
           <p>Votre compte QR Studio a été créé avec succès. Vous pouvez dès maintenant créer vos premiers QR codes dynamiques.</p>
           <p>Commencez par créer votre premier QR code — c'est rapide et intuitif.</p>
           <p style="text-align:center;margin-top:24px;">
@@ -80,10 +92,10 @@ export const emailService = {
       await client.emails.send({
         from: FROM_ADDRESS,
         to: email,
-        subject: `${invitedByName} vous invite à rejoindre ${workspaceName}`,
+        subject: `${escapeHtml(invitedByName)} vous invite à rejoindre ${escapeHtml(workspaceName)}`,
         html: wrapHtml(`
-          <h1>Invitation à rejoindre ${workspaceName}</h1>
-          <p>${invitedByName} vous invite à collaborer sur l'espace de travail <strong>${workspaceName}</strong>.</p>
+          <h1>Invitation à rejoindre ${escapeHtml(workspaceName)}</h1>
+          <p>${escapeHtml(invitedByName)} vous invite à collaborer sur l'espace de travail <strong>${escapeHtml(workspaceName)}</strong>.</p>
           <p style="text-align:center;margin-top:24px;">
             <a href="${inviteUrl}" style="display:inline-block;background:#6366f1;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
               Accepter l'invitation
