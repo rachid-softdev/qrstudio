@@ -6,7 +6,7 @@ import { qrService } from "@/server/services/qr.service"
 import { analyticsService } from "@/server/services/analytics.service"
 import { QRCreateSchema, QRUpdateSchema } from "@/lib/validations"
 import { generateQRSvg, generateQrPngBuffer, generateQrPdfBuffer } from "@/lib/qr-generator"
-import type { Plan, QRStatus } from "@prisma/client"
+import type { QRStatus } from "@prisma/client"
 
 const QRTypeEnum = z.enum(['URL','WHATSAPP','WIFI','VCARD','PDF','TEXT','LANDING_PAGE'])
 const QRStatusEnum = z.enum(['ACTIVE','PAUSED'])
@@ -140,7 +140,6 @@ export const qrRouter = router({
       if (workspace.role !== 'OWNER') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut restaurer un QR code' })
       }
-      await qrService.checkPlanLimit(input.workspaceId, ctx.user.plan as Plan)
       await qrService.restore(input.id, input.workspaceId)
       return { success: true }
     }),
