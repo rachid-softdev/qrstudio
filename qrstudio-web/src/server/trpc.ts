@@ -19,10 +19,18 @@ export interface TRPCContext {
     slug: string
     role: string
   }
+  reqHeaders?: Record<string, string>
 }
 
-export async function createTRPCContext(): Promise<TRPCContext> {
+export async function createTRPCContext(opts?: { headers: Headers }): Promise<TRPCContext> {
   const session = await auth()
+
+  const headers: Record<string, string> = {}
+  if (opts?.headers) {
+    opts.headers.forEach((value, key) => {
+      headers[key.toLowerCase()] = value
+    })
+  }
 
   return {
     db: prisma,
@@ -36,6 +44,7 @@ export async function createTRPCContext(): Promise<TRPCContext> {
           plan: (session.user.plan as string) ?? "FREE",
         }
       : undefined,
+    reqHeaders: headers,
   }
 }
 
@@ -61,7 +70,25 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
   })
 })
 
-export const protectedProcedure = t.procedure.use(enforceUserIsAuthed)
+const csrfMiddleware = t.middleware(({ ctx, next, type }) => {
+  if (type === 'query') {
+    return next({ ctx })
+  }
+
+  const reqHeaders = (ctx as Record<string, unknown>).reqHeaders as Record<string, string> | undefined
+  const csrfToken = reqHeaders?.['x-csrf-token']
+
+  if (csrfToken !== '1') {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Token CSRF manquant ou invalide',
+    })
+  }
+
+  return next({ ctx })
+})
+
+export const protectedProcedure = t.procedure.use(enforceUserIsAuthed).use(csrfMiddleware)
 
 export async function requireWorkspaceAccess(userId: string, workspaceId: string): Promise<{ id: string; role: string }> {
   const member = await prisma.workspaceMember.findUnique({

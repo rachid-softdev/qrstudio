@@ -178,7 +178,10 @@ model QRCode {
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   scans       Scan[]
   scanDaily   ScanDaily[]
-  landingPage LandingPage? @relation(fields: [landingPageId], references: [id], onDelete: Cascade)
+  // SÉCURITÉ : onDelete: SetNull au lieu de Cascade pour éviter la suppression
+  // en cascade inattendue. Quand une LandingPage est supprimée, le QRCode
+  // associé reste actif avec landingPageId = null (soft orphan).
+  landingPage LandingPage? @relation(fields: [landingPageId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId])
   @@index([createdAt])
@@ -269,6 +272,8 @@ model ApiKey {
   keyPrefix String
   lastUsedAt DateTime?
   revokedAt  DateTime?
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
   createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

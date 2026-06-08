@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { emailSchema, urlSchema, hexColorSchema, QRCreateSchema } from "@/lib/validations"
+import { emailSchema, urlSchema, safeUrlSchema, hexColorSchema, QRCreateSchema, QRUpdateSchema, frameTypeSchema } from "@/lib/validations"
 
 describe("emailSchema", () => {
   it("should accept valid emails", () => {
@@ -23,6 +23,35 @@ describe("urlSchema", () => {
   it("should reject invalid URLs", () => {
     expect(() => urlSchema.parse("not-a-url")).toThrow()
     expect(() => urlSchema.parse("")).toThrow()
+  })
+})
+
+describe("safeUrlSchema", () => {
+  it("should accept valid HTTP URLs", () => {
+    expect(safeUrlSchema.parse("http://example.com")).toBe("http://example.com")
+    expect(safeUrlSchema.parse("http://localhost:3000/path")).toBe("http://localhost:3000/path")
+  })
+
+  it("should accept valid HTTPS URLs", () => {
+    expect(safeUrlSchema.parse("https://example.com")).toBe("https://example.com")
+    expect(safeUrlSchema.parse("https://api.qrstudio.app/v1/data")).toBe("https://api.qrstudio.app/v1/data")
+  })
+
+  it("should reject non-HTTP protocols (file://)", () => {
+    expect(() => safeUrlSchema.parse("file:///etc/passwd")).toThrow()
+  })
+
+  it("should reject non-HTTP protocols (ftp://)", () => {
+    expect(() => safeUrlSchema.parse("ftp://evil.com/file")).toThrow()
+  })
+
+  it("should reject javascript: URLs", () => {
+    expect(() => safeUrlSchema.parse("javascript:alert(1)")).toThrow()
+  })
+
+  it("should reject invalid URL strings", () => {
+    expect(() => safeUrlSchema.parse("not-a-url")).toThrow()
+    expect(() => safeUrlSchema.parse("")).toThrow()
   })
 })
 
@@ -115,5 +144,108 @@ describe("QRCreateSchema", () => {
         destinationUrl: "https://example.com",
       })
     ).toThrow()
+  })
+
+  it("should reject invalid frameType (path traversal attempt)", () => {
+    expect(() =>
+      QRCreateSchema.parse({
+        workspaceId: "ws-1",
+        name: "Test QR",
+        type: "URL",
+        destinationUrl: "https://example.com",
+        frameType: "../../etc/passwd",
+      })
+    ).toThrow()
+
+    expect(() =>
+      QRCreateSchema.parse({
+        workspaceId: "ws-1",
+        name: "Test QR",
+        type: "URL",
+        destinationUrl: "https://example.com",
+        frameType: "..%2F..%2Fetc%2Fpasswd",
+      })
+    ).toThrow()
+
+    expect(() =>
+      QRCreateSchema.parse({
+        workspaceId: "ws-1",
+        name: "Test QR",
+        type: "URL",
+        destinationUrl: "https://example.com",
+        frameType: "null",
+      })
+    ).toThrow()
+  })
+
+  it("should accept valid frameType values", () => {
+    const validFrameTypes = ['1', '2', '3', '4', '5', '6', 'bold', 'dashed', 'elegant', 'minimal', 'neon', 'rounded']
+    for (const frameType of validFrameTypes) {
+      const result = QRCreateSchema.parse({
+        workspaceId: "ws-1",
+        name: "Test QR",
+        type: "URL",
+        destinationUrl: "https://example.com",
+        frameType,
+      })
+      expect(result.frameType).toBe(frameType)
+    }
+  })
+
+  it("should accept absence of frameType (optional)", () => {
+    const result = QRCreateSchema.parse({
+      workspaceId: "ws-1",
+      name: "Test QR",
+      type: "URL",
+      destinationUrl: "https://example.com",
+    })
+    expect(result.frameType).toBeUndefined()
+  })
+})
+
+describe("QRUpdateSchema — frameType validation", () => {
+  it("should reject invalid frameType in update", () => {
+    expect(() =>
+      QRUpdateSchema.parse({
+        frameType: "../../etc/shadow",
+      })
+    ).toThrow()
+  })
+
+  it("should reject path traversal patterns in update", () => {
+    expect(() =>
+      QRUpdateSchema.parse({
+        frameType: "..\\..\\windows\\system32",
+      })
+    ).toThrow()
+  })
+
+  it("should accept valid frameType in update", () => {
+    const validFrameTypes = ['1', '2', '3', '4', '5', '6', 'bold', 'dashed', 'elegant', 'minimal', 'neon', 'rounded']
+    for (const frameType of validFrameTypes) {
+      const result = QRUpdateSchema.parse({ frameType })
+      expect(result.frameType).toBe(frameType)
+    }
+  })
+
+  it("should accept absence of frameType in update (optional)", () => {
+    const result = QRUpdateSchema.parse({ name: "Just rename" })
+    expect(result.frameType).toBeUndefined()
+  })
+})
+
+describe("frameTypeSchema", () => {
+  it("should reject path traversal strings", () => {
+    expect(() => frameTypeSchema.parse("../../../etc/passwd")).toThrow()
+    expect(() => frameTypeSchema.parse("..\\..\\..\\windows\\win.ini")).toThrow()
+    expect(() => frameTypeSchema.parse("%2e%2e%2f%2e%2e%2f")).toThrow()
+    expect(() => frameTypeSchema.parse("....//....//etc/passwd")).toThrow()
+    expect(() => frameTypeSchema.parse("....\\\\....\\\\windows\\system32")).toThrow()
+  })
+
+  it("should accept all valid frame types", () => {
+    expect(frameTypeSchema.parse("minimal")).toBe("minimal")
+    expect(frameTypeSchema.parse("dashed")).toBe("dashed")
+    expect(frameTypeSchema.parse("neon")).toBe("neon")
   })
 })

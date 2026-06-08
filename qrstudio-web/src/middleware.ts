@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
-import { qrRateLimit, authRateLimit } from "@/lib/rate-limit"
+import { qrRateLimit, authRateLimit, trpcMutationLimit, trpcQueryLimit } from "@/lib/rate-limit"
 
 const authRoutes = ["/login", "/register"]
 const publicPrefixes = [
@@ -26,6 +26,12 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
 
+  if (url.startsWith("/api/v1/")) {
+    const newUrl = url.replace("/api/v1/", "/api/")
+    const requestUrl = new URL(newUrl, request.url)
+    return addRequestId(NextResponse.rewrite(requestUrl), requestId)
+  }
+
   if (url.startsWith("/api/qr/")) {
     const { success, remaining } = await qrRateLimit.limit(ip)
     if (!success) {
@@ -49,6 +55,29 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
       })
       return addRequestId(resp, requestId)
     }
+  }
+
+  // Rate limiting for tRPC API
+  if (url.startsWith("/api/trpc/")) {
+    const limiter = request.method === "POST" ? trpcMutationLimit : trpcQueryLimit
+    const { success, remaining } = await limiter.limit(ip)
+    if (!success) {
+      const resp = new NextResponse(
+        JSON.stringify({ error: "Too Many Requests" }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "X-RateLimit-Remaining": "0",
+            "Retry-After": "60",
+          },
+        }
+      )
+      return addRequestId(resp, requestId)
+    }
+    const response = NextResponse.next()
+    response.headers.set("X-RateLimit-Remaining", String(remaining))
+    return addRequestId(response, requestId)
   }
 
   // Skip middleware for public prefixes (API, webhooks, invite links, etc.)
@@ -85,7 +114,9 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
 export const config = {
   matcher: [
+    "/api/v1/:path*",
     "/api/qr/:path*",
+    "/api/trpc/:path*",
     "/dashboard",
     "/dashboard/:path*",
     "/login",

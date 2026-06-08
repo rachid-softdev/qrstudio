@@ -84,7 +84,7 @@ export const apiKeyService = {
 
     const apiKey = await prisma.apiKey.findUnique({
       where: { keyHash },
-      select: { userId: true, revokedAt: true, id: true },
+      select: { userId: true, revokedAt: true, id: true, lockedUntil: true, failedAttempts: true },
     })
 
     if (!apiKey) {
@@ -101,11 +101,52 @@ export const apiKeyService = {
       })
     }
 
+    if (apiKey.lockedUntil && apiKey.lockedUntil > new Date()) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Clé API temporairement verrouillée (trop de tentatives)",
+      })
+    }
+
+    // Réinitialiser le compteur d'échecs en cas de succès
+    if (apiKey.failedAttempts > 0) {
+      await prisma.apiKey.update({
+        where: { id: apiKey.id },
+        data: { failedAttempts: 0, lockedUntil: null },
+      })
+    }
+
     await prisma.apiKey.update({
       where: { id: apiKey.id },
       data: { lastUsedAt: new Date() },
     })
 
     return { userId: apiKey.userId }
+  },
+
+  async recordFailedAttempt(keyHash: string) {
+    const apiKey = await prisma.apiKey.findUnique({
+      where: { keyHash },
+      select: { id: true, failedAttempts: true },
+    })
+
+    if (!apiKey) return
+
+    const newAttempts = apiKey.failedAttempts + 1
+
+    if (newAttempts >= 10) {
+      await prisma.apiKey.update({
+        where: { id: apiKey.id },
+        data: {
+          failedAttempts: newAttempts,
+          lockedUntil: new Date(Date.now() + 15 * 60 * 1000),
+        },
+      })
+    } else {
+      await prisma.apiKey.update({
+        where: { id: apiKey.id },
+        data: { failedAttempts: newAttempts },
+      })
+    }
   },
 }

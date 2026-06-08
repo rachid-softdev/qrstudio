@@ -39,6 +39,7 @@ function ctx(overrides?: Partial<TRPCContext>): TRPCContext {
     session: null,
     user: undefined,
     workspace: undefined,
+    reqHeaders: { "x-csrf-token": "1" },
     ...overrides,
   }
 }

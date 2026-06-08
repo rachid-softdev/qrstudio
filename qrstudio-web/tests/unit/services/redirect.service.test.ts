@@ -18,9 +18,25 @@ function makeQR(overrides: { type: QRType; destinationUrl?: string | null; short
 }
 
 describe("resolveDestination", () => {
-  it("URL type should return destinationUrl directly", () => {
-    const result = resolveDestination(makeQR({ type: "URL", destinationUrl: "https://example.com" }))
-    expect(result).toBe("https://example.com")
+  // ─── URL type — open redirect protection ───────────────────────────────
+  it("URL type should return internal destinationUrl directly", () => {
+    const result = resolveDestination(makeQR({ type: "URL", destinationUrl: "/dashboard" }))
+    expect(result).toBe("/dashboard")
+  })
+
+  it("URL type should return internal app URL directly", () => {
+    const result = resolveDestination(makeQR({ type: "URL", destinationUrl: "https://qrstudio.app/page" }))
+    expect(result).toBe("https://qrstudio.app/page")
+  })
+
+  it("URL type should block external URLs and return '/redirect-blocked'", () => {
+    const result = resolveDestination(makeQR({ type: "URL", destinationUrl: "https://evil.com/phish" }))
+    expect(result).toBe("/redirect-blocked")
+  })
+
+  it("URL type should block external URLs with non-HTTP protocols", () => {
+    const result = resolveDestination(makeQR({ type: "URL", destinationUrl: "ftp://evil.com/file" }))
+    expect(result).toBe("/redirect-blocked")
   })
 
   it("URL type should return '/' if destinationUrl is null", () => {
@@ -31,6 +47,11 @@ describe("resolveDestination", () => {
   it("WHATSAPP type should return wa.me link with cleaned phone", () => {
     const result = resolveDestination(makeQR({ type: "WHATSAPP", destinationUrl: "+33 6 12 34 56 78" }))
     expect(result).toBe("https://wa.me/33612345678")
+  })
+
+  it("WHATSAPP type should handle wa.me domain (allowed external)", () => {
+    const result = resolveDestination(makeQR({ type: "WHATSAPP", destinationUrl: "https://wa.me/123456789" }))
+    expect(result).toBe("https://wa.me/123456789")
   })
 
   it("WIFI type should return /wifi/[shortCode]", () => {
