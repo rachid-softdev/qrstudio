@@ -4,6 +4,13 @@ import * as Sentry from "@sentry/nextjs"
 import Stripe from "stripe"
 import { prisma } from "@/server/db"
 import { emailService } from "@/server/services/email.service"
+import { totpService } from "@/server/services/totp.service"
+
+interface PartialTokenPayload {
+  userId: string
+  type: string
+  iat?: number
+}
 
 const MAX_LOGIN_ATTEMPTS = 5
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000 // 15 minutes
@@ -214,4 +221,141 @@ export const authService = {
       /* already logged in emailService */
     })
   },
+
+  // ─── TOTP ────────────────────────────────────────────────────────────────
+
+  async generateTotpSetup(userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable" })
+    if (user.totpEnabled) throw new TRPCError({ code: "FORBIDDEN", message: "TOTP déjà activé" })
+
+    const { secret, uri } = totpService.generateSecret()
+    await prisma.user.update({ where: { id: userId }, data: { totpSecret: secret } })
+
+    return { secret, uri }
+  },
+
+  async verifyAndEnableTotp(userId: string, token: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user || !user.totpSecret)
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Aucun secret TOTP généré" })
+    if (user.totpEnabled) throw new TRPCError({ code: "FORBIDDEN", message: "TOTP déjà activé" })
+
+    if (!totpService.verifyToken(token, user.totpSecret)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Code invalide" })
+    }
+
+    const { plain, hashed } = totpService.generateBackupCodes()
+    const backupCodes = hashed.map((h) => ({ code_hash: h, used: false }))
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        totpEnabled: true,
+        totpBackupCodes: backupCodes as any,
+        totpVerifiedAt: new Date(),
+      },
+    })
+
+    return { backupCodes: plain }
+  },
+
+  async verifyTotpChallenge(partialToken: string, token: string) {
+    const { userId } = await verifyPartialToken(partialToken)
+
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user || !user.totpEnabled || !user.totpSecret) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "TOTP non configuré" })
+    }
+
+    if (!totpService.verifyToken(token, user.totpSecret)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Code invalide" })
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpVerifiedAt: new Date() },
+    })
+
+    return { verified: true }
+  },
+
+  async verifyBackupCode(partialToken: string, backupCode: string) {
+    const { userId } = await verifyPartialToken(partialToken)
+
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user || !user.totpEnabled || !user.totpBackupCodes) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "TOTP non configuré" })
+    }
+
+    const codes = user.totpBackupCodes as { code_hash: string; used: boolean }[]
+    const index = totpService.verifyBackupCode(backupCode, codes)
+    if (index === -1) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Code de secours invalide ou déjà utilisé",
+      })
+    }
+
+    codes[index].used = true
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpBackupCodes: codes as any, totpVerifiedAt: new Date() },
+    })
+
+    return { verified: true }
+  },
+
+  async disableTotp(userId: string, password: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user || !user.totpEnabled)
+      throw new TRPCError({ code: "BAD_REQUEST", message: "TOTP non activé" })
+
+    const bcrypt = await import("bcryptjs")
+    if (user.passwordHash) {
+      const valid = await bcrypt.compare(password, user.passwordHash)
+      if (!valid) throw new TRPCError({ code: "BAD_REQUEST", message: "Mot de passe incorrect" })
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        totpSecret: null,
+        totpEnabled: false,
+        totpBackupCodes: null,
+        totpVerifiedAt: null,
+      },
+    })
+
+    return { success: true }
+  },
+
+  async createPartialAuthToken(userId: string): Promise<string> {
+    const { default: jwt } = await import("jsonwebtoken")
+    const secret = process.env.NEXTAUTH_SECRET
+    if (!secret) throw new Error("NEXTAUTH_SECRET not configured")
+
+    return jwt.sign({ userId, type: "partial_auth" }, secret, { expiresIn: "5m" })
+  },
+}
+
+async function verifyPartialToken(partialToken: string): Promise<{ userId: string }> {
+  try {
+    const { decode } = await import("jsonwebtoken")
+    const decoded = decode(partialToken) as PartialTokenPayload | null
+    if (!decoded || decoded.type !== "partial_auth") {
+      throw new Error("Token invalide")
+    }
+    const iat = decoded.iat ? decoded.iat * 1000 : 0
+    if (Date.now() - iat > 5 * 60 * 1000) {
+      throw new Error("Token expiré")
+    }
+    return { userId: decoded.userId }
+  } catch (err) {
+    if (err instanceof TRPCError) throw err
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Session expirée, veuillez vous reconnecter",
+    })
+  }
 }
