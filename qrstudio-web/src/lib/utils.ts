@@ -41,6 +41,10 @@ function getRandomInt(max: number): number {
   return array[0] % max
 }
 
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export function generateShortCode(length = 6): string {
   let result = ""
   for (let i = 0; i < length; i++) {

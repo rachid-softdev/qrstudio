@@ -21,7 +21,7 @@ function ctx(overrides?: Partial<TRPCContext>): TRPCContext {
   return { db: prismaMock as never, session: null, user: undefined, workspace: undefined, ...overrides }
 }
 function authed(userId = "user-1", plan = "FREE"): TRPCContext {
-  return ctx({ user: { id: userId, email: "u@t.com", name: "U", image: null, plan } })
+  return ctx({ user: { id: userId, email: "u@t.com", name: "U", image: null, plan }, reqHeaders: { "x-csrf-token": "1" } })
 }
 
 describe("apiKeyRouter", () => {

@@ -1,4 +1,5 @@
 import type { QRType, QRStatus } from "@prisma/client"
+import { isSafeRedirectUrl } from "@/lib/url-security"
 
 export interface QRCodeRecord {
   shortCode: string
@@ -18,7 +19,10 @@ export function resolveDestination(qrCode: QRCodeRecord): string {
 
   switch (qrCode.type) {
     case 'URL':
-      return destinationUrl ?? '/'
+      if (destinationUrl && isSafeRedirectUrl(destinationUrl)) {
+        return destinationUrl
+      }
+      return destinationUrl ? '/redirect-blocked' : '/'
     case 'WHATSAPP': {
       const phone = destinationUrl ?? ''
       const cleaned = phone.replace(/[^0-9]/g, '')
