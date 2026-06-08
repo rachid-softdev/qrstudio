@@ -48,6 +48,10 @@ model User {
   passwordHash  String?
   loginAttempts Int       @default(0)
   lockoutUntil  DateTime?
+  totpSecret    String?
+  totpEnabled   Boolean   @default(false)
+  totpBackupCodes Json?   @db.JsonB
+  totpVerifiedAt DateTime?
   plan          Plan      @default(FREE)
   stripeCustomerId   String?  @unique
   stripeSubscriptionId String? @unique

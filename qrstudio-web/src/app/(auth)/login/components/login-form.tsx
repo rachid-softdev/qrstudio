@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { signIn } from "next-auth/react"
+import { signIn, getSession } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { Loader2Icon, EyeIcon, EyeOffIcon } from "lucide-react"
@@ -50,6 +50,12 @@ export function LoginForm() {
       }
 
       if (result?.ok) {
+        // Check if TOTP is required (2FA challenge)
+        const session = await getSession()
+        if (session?.user?.needsTotp && session?.user?.partialToken) {
+          router.push(`/auth/totp?partialToken=${encodeURIComponent(session.user.partialToken)}&callbackUrl=${encodeURIComponent(callbackUrl)}`)
+          return
+        }
         router.push(callbackUrl)
         router.refresh()
       }
