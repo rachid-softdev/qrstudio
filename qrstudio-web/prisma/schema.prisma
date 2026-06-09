@@ -187,8 +187,7 @@ model QRCode {
   // associé reste actif avec landingPageId = null (soft orphan).
   landingPage LandingPage? @relation(fields: [landingPageId], references: [id], onDelete: SetNull)
 
-  @@index([workspaceId])
-  @@index([createdAt])
+  @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, type, status])
   @@index([workspaceId, deletedAt])
 }
@@ -228,10 +227,8 @@ model Scan {
 
   qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
 
-  @@index([qrCodeId])
-  @@index([qrCodeId, scannedAt])
+  @@index([qrCodeId, scannedAt, ipHash])
   @@index([scannedAt])
-  @@index([qrCodeId, ipHash])
 }
 
 // ─── Analytics — Summary ──────────────────────────────────────────────────────
