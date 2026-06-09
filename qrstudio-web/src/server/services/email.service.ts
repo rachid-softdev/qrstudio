@@ -77,7 +77,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
-      logger.error("Erreur envoi email bienvenue", error)
+      logger.error(error, "Erreur envoi email bienvenue")
       Sentry.captureException(error)
     }
   },
@@ -105,7 +105,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
-      logger.error("Erreur envoi email invitation", error)
+      logger.error(error, "Erreur envoi email invitation")
       Sentry.captureException(error)
     }
   },
@@ -126,7 +126,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
-      logger.error("Erreur envoi email suppression compte", error)
+      logger.error(error, "Erreur envoi email suppression compte")
       Sentry.captureException(error)
     }
   },
@@ -147,7 +147,7 @@ export const emailService = {
         `),
       })
     } catch (error) {
-      logger.error("Erreur envoi email changement mot de passe", error)
+      logger.error(error, "Erreur envoi email changement mot de passe")
       Sentry.captureException(error)
     }
   },

@@ -111,7 +111,7 @@ export const billingService = {
         cancelAtPeriodEnd: subscription.cancel_at_period_end,
       }
     } catch (error) {
-      logger.error("Échec récupération abonnement Stripe", error)
+      logger.error(error, "Échec récupération abonnement Stripe")
       Sentry.captureException(new Error("Échec récupération abonnement Stripe"))
       return {
         plan: user.plan as Plan,

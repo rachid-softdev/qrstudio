@@ -1,4 +1,5 @@
 import { z } from "zod"
+import logger from "@/lib/logger"
 
 const envSchema = z.object({
   // ─── Core ──────────────────────────────────────────────────────────────────
@@ -57,8 +58,8 @@ export function validateEnv(): Env {
       ? `Variables d'environnement manquantes : ${missingVars.join(", ")}`
       : `Erreurs de validation : ${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`
 
-    console.error("❌ Validation des variables d'environnement échouée :")
-    console.error(result.error.toString())
+    logger.fatal("Validation des variables d'environnement échouée :")
+    logger.fatal(result.error.toString())
 
     // En production, on utilise des defaults pour les valeurs optionnelles,
     // donc on ne bloque pas le démarrage — on logge seulement

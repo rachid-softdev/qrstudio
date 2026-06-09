@@ -2,7 +2,9 @@ import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
 import { auth } from "@/server/auth"
 import { prisma } from "@/server/db"
+import logger from "@/lib/logger"
 import type { PrismaClient } from "@prisma/client"
+import type { Logger } from "pino"
 
 export interface TRPCContext {
   db: PrismaClient
@@ -20,6 +22,8 @@ export interface TRPCContext {
     role: string
   }
   reqHeaders?: Record<string, string>
+  requestId?: string
+  logger?: Logger
 }
 
 export async function createTRPCContext(opts?: { headers: Headers }): Promise<TRPCContext> {
@@ -31,6 +35,11 @@ export async function createTRPCContext(opts?: { headers: Headers }): Promise<TR
       headers[key.toLowerCase()] = value
     })
   }
+
+  // Extract X-Request-ID from request headers or generate one.
+  // Note: Next.js middleware sets X-Request-ID on the response, not the request,
+  // so this will typically generate a fresh UUID per tRPC call.
+  const requestId = headers["x-request-id"] ?? crypto.randomUUID()
 
   return {
     db: prisma,
@@ -45,6 +54,7 @@ export async function createTRPCContext(opts?: { headers: Headers }): Promise<TR
         }
       : undefined,
     reqHeaders: headers,
+    requestId,
   }
 }
 
@@ -112,7 +122,34 @@ const csrfMiddleware = t.middleware(({ ctx, next, type }) => {
   })
 })
 
-export const protectedProcedure = t.procedure.use(enforceUserIsAuthed).use(csrfMiddleware)
+/**
+ * Middleware that attaches a child logger with the request correlation ID.
+ * The child logger is available as `ctx.logger` in all downstream procedures.
+ */
+const logMiddleware = t.middleware(({ ctx, next }) => {
+  const requestId = ctx.requestId ?? crypto.randomUUID()
+  const childLogger = logger.child({ requestId })
+  return next({
+    ctx: {
+      ...ctx,
+      requestId,
+      logger: childLogger,
+    },
+  })
+})
+
+/**
+ * Procedure with a child logger scoped to the current request.
+ * Use this when you need correlation IDs in your logs.
+ */
+export const loggedProcedure = t.procedure.use(logMiddleware)
+
+/**
+ * Authenticated + CSRF-protected procedure.
+ * Includes the loggedProcedure middleware so all authenticated
+ * routes automatically get request-scoped logging.
+ */
+export const protectedProcedure = loggedProcedure.use(enforceUserIsAuthed).use(csrfMiddleware)
 
 export async function requireWorkspaceAccess(userId: string, workspaceId: string): Promise<{ id: string; role: string }> {
   const member = await prisma.workspaceMember.findUnique({

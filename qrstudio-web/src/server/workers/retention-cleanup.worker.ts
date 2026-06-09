@@ -1,6 +1,7 @@
 import { getQueue, QUEUE_NAMES } from "@/server/queue"
 import { prisma } from "@/server/db"
 import * as Sentry from "@sentry/nextjs"
+import logger from "@/lib/logger"
 
 const BATCH_DELETE_LIMIT = 10_000
 
@@ -55,12 +56,12 @@ export async function startRetentionCleanupWorker(): Promise<void> {
         LIMIT ${BATCH_DELETE_LIMIT}
       `
 
-      console.log(
+      logger.info(
         `[RetentionCleanup] Deleted FREE=${deletedFree} PRO=${deletedPro} scan rows`,
       )
     } catch (error) {
       Sentry.captureException(error)
-      console.error("[RetentionCleanup] Failed:", error)
+      logger.error(error, "[RetentionCleanup] Failed")
       throw error
     }
   })

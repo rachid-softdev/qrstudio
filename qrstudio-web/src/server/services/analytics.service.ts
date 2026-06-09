@@ -102,7 +102,7 @@ export const analyticsService = {
       try {
         country = await getCountry(data.ip)
       } catch (error) {
-        logger.error("Erreur géolocalisation IP", error)
+        logger.error(error, "Erreur géolocalisation IP")
         country = null
       }
     }

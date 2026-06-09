@@ -1,19 +1,38 @@
-const IS_DEV = process.env.NODE_ENV !== "production"
+import pino from "pino"
 
-const logger = {
-  info: (msg: string, ...args: unknown[]) => {
-    if (IS_DEV) console.log(`[INFO] ${msg}`, ...args)
-    // En production, utiliser un vrai logger JSON (pino ou équivalent)
+const level =
+  process.env.LOG_LEVEL ??
+  (process.env.NODE_ENV === "production" ? "info" : "debug")
+
+const logger = pino({
+  level,
+  base: undefined,
+  serializers: {
+    err: pino.stdSerializers.err,
   },
-  error: (msg: string, ...args: unknown[]) => {
-    console.error(`[ERROR] ${msg}`, ...args)
+  redact: {
+    paths: [
+      "password",
+      "passwordHash",
+      "totpSecret",
+      "totpBackupCodes",
+      "authorization",
+      "cookie",
+      "token",
+      "accessToken",
+      "refreshToken",
+    ],
+    censor: "[REDACTED]",
   },
-  warn: (msg: string, ...args: unknown[]) => {
-    console.warn(`[WARN] ${msg}`, ...args)
-  },
-  debug: (msg: string, ...args: unknown[]) => {
-    if (IS_DEV) console.debug(`[DEBUG] ${msg}`, ...args)
-  },
-}
+  // Pretty-print only in development (not test or production)
+  ...(process.env.NODE_ENV === "development"
+    ? {
+        transport: {
+          target: "pino-pretty",
+          options: { colorize: true },
+        },
+      }
+    : {}),
+})
 
 export default logger

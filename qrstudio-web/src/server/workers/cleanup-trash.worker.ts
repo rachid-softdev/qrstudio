@@ -2,6 +2,7 @@ import { getQueue, QUEUE_NAMES } from "@/server/queue"
 import { prisma } from "@/server/db"
 import type { Plan } from "@prisma/client"
 import * as Sentry from "@sentry/nextjs"
+import logger from "@/lib/logger"
 
 const BATCH_DELETE_LIMIT = 10_000
 
@@ -50,12 +51,12 @@ export async function startCleanupTrashWorker(): Promise<void> {
           const result = await prisma.qRCode.deleteMany({
             where: { id: { in: ids } },
           })
-          console.log(`[CleanupTrash] Deleted ${result.count} ${plan} QR codes from trash`)
+          logger.info(`[CleanupTrash] Deleted ${result.count} ${plan} QR codes from trash`)
         }
       }
     } catch (error) {
       Sentry.captureException(error)
-      console.error("[CleanupTrash] Failed:", error)
+      logger.error(error, "[CleanupTrash] Failed")
       throw error
     }
   })
