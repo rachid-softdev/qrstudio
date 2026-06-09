@@ -89,23 +89,6 @@ export const qrService = {
 
     const shortCode = await qrService.generateUniqueShortCode()
 
-    let landingPageId: string | undefined
-
-    if (data.type === 'LANDING_PAGE' && data.landingPage) {
-      const landingPage = await prisma.landingPage.create({
-        data: {
-          title: data.landingPage.title,
-          description: data.landingPage.description ?? null,
-          ctaLabel: data.landingPage.ctaLabel ?? null,
-          ctaUrl: data.landingPage.ctaUrl ?? null,
-          imageUrl: data.landingPage.imageUrl ?? null,
-          bgColor: data.landingPage.bgColor ?? '#FFFFFF',
-          textColor: data.landingPage.textColor ?? '#111827',
-        },
-      })
-      landingPageId = landingPage.id
-    }
-
     const qrData = prepareQRData(data, shortCode)
     const svgContent = await generateQRSvg(qrData, {
       fgColor: data.fgColor ?? '#000000',
@@ -120,6 +103,7 @@ export const qrService = {
     // Évite la race condition entre le checkPlanLimit (count) et la création.
     // Sans ce lock, deux requêtes simultanées pourraient toutes deux passer
     // le checkPlanLimit et créer des QR codes au-delà de la limite.
+    // La LandingPage est créée dans la même transaction pour garantir l'atomicité.
     const qrCode = await prisma.$transaction(async (tx) => {
       // Acquérir un lock exclusif pour ce workspace
       // pg_advisory_xact_lock se libère automatiquement à la fin de la transaction
@@ -141,6 +125,23 @@ export const qrService = {
             message: `Limite de ${limit} QR codes atteinte pour votre plan. Passez au plan supérieur.`,
           })
         }
+      }
+
+      // Créer la LandingPage dans la transaction si nécessaire
+      let landingPageId: string | undefined
+      if (data.type === 'LANDING_PAGE' && data.landingPage) {
+        const landingPage = await tx.landingPage.create({
+          data: {
+            title: data.landingPage.title,
+            description: data.landingPage.description ?? null,
+            ctaLabel: data.landingPage.ctaLabel ?? null,
+            ctaUrl: data.landingPage.ctaUrl ?? null,
+            imageUrl: data.landingPage.imageUrl ?? null,
+            bgColor: data.landingPage.bgColor ?? '#FFFFFF',
+            textColor: data.landingPage.textColor ?? '#111827',
+          },
+        })
+        landingPageId = landingPage.id
       }
 
       return await tx.qRCode.create({
@@ -211,39 +212,41 @@ export const qrService = {
     if (data.frameType !== undefined) updateData.frameType = data.frameType
     if (data.frameLabel !== undefined) updateData.frameLabel = data.frameLabel
 
-    if (existing.type === 'LANDING_PAGE' && data.landingPage) {
-      if (existing.landingPage) {
-        await prisma.landingPage.update({
-          where: { id: existing.landingPage.id },
-          data: {
-            title: data.landingPage.title,
-            description: data.landingPage.description ?? null,
-            ctaLabel: data.landingPage.ctaLabel ?? null,
-            ctaUrl: data.landingPage.ctaUrl ?? null,
-            imageUrl: data.landingPage.imageUrl ?? null,
-            bgColor: data.landingPage.bgColor ?? '#FFFFFF',
-            textColor: data.landingPage.textColor ?? '#111827',
-          },
-        })
-      } else {
-        const lp = await prisma.landingPage.create({
-          data: {
-            title: data.landingPage.title,
-            description: data.landingPage.description ?? null,
-            ctaLabel: data.landingPage.ctaLabel ?? null,
-            ctaUrl: data.landingPage.ctaUrl ?? null,
-            imageUrl: data.landingPage.imageUrl ?? null,
-            bgColor: data.landingPage.bgColor ?? '#FFFFFF',
-            textColor: data.landingPage.textColor ?? '#111827',
-          },
-        })
-        updateData.landingPageId = lp.id
+    await prisma.$transaction(async (tx) => {
+      if (existing.type === 'LANDING_PAGE' && data.landingPage) {
+        if (existing.landingPage) {
+          await tx.landingPage.update({
+            where: { id: existing.landingPage.id },
+            data: {
+              title: data.landingPage.title,
+              description: data.landingPage.description ?? null,
+              ctaLabel: data.landingPage.ctaLabel ?? null,
+              ctaUrl: data.landingPage.ctaUrl ?? null,
+              imageUrl: data.landingPage.imageUrl ?? null,
+              bgColor: data.landingPage.bgColor ?? '#FFFFFF',
+              textColor: data.landingPage.textColor ?? '#111827',
+            },
+          })
+        } else {
+          const lp = await tx.landingPage.create({
+            data: {
+              title: data.landingPage.title,
+              description: data.landingPage.description ?? null,
+              ctaLabel: data.landingPage.ctaLabel ?? null,
+              ctaUrl: data.landingPage.ctaUrl ?? null,
+              imageUrl: data.landingPage.imageUrl ?? null,
+              bgColor: data.landingPage.bgColor ?? '#FFFFFF',
+              textColor: data.landingPage.textColor ?? '#111827',
+            },
+          })
+          updateData.landingPageId = lp.id
+        }
       }
-    }
 
-    await prisma.qRCode.update({
-      where: { id },
-      data: updateData,
+      await tx.qRCode.update({
+        where: { id },
+        data: updateData,
+      })
     })
 
     let svgContent: string | undefined

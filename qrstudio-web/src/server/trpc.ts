@@ -76,16 +76,40 @@ const csrfMiddleware = t.middleware(({ ctx, next, type }) => {
   }
 
   const reqHeaders = (ctx as Record<string, unknown>).reqHeaders as Record<string, string> | undefined
-  const csrfToken = reqHeaders?.['x-csrf-token']
+  const headerToken = reqHeaders?.['x-csrf-token']
+  const session = (ctx as Record<string, unknown>).session as { csrfToken?: string } | null | undefined
 
-  if (csrfToken !== '1') {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Token CSRF manquant ou invalide',
-    })
+  // Authenticated mutations: validate against session CSRF token
+  if (session?.csrfToken) {
+    if (!headerToken || headerToken !== session.csrfToken) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Token CSRF manquant ou invalide',
+      })
+    }
+    return next({ ctx })
   }
 
-  return next({ ctx })
+  // Unauthenticated mutations: validate via Origin header
+  const origin = reqHeaders?.['origin']
+  const host = reqHeaders?.['host']
+  if (origin) {
+    const allowedOrigin = process.env.NEXTAUTH_URL ?? process.env.VERCEL_URL ?? `http://localhost:${process.env.PORT ?? 3000}`
+    const originHost = new URL(origin).host
+    if (originHost !== (host ?? allowedOrigin.replace(/^https?:\/\//, ''))) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Requête cross-origin rejetée',
+      })
+    }
+    return next({ ctx })
+  }
+
+  // No session and no Origin → reject mutation
+  throw new TRPCError({
+    code: 'BAD_REQUEST',
+    message: 'Token CSRF manquant',
+  })
 })
 
 export const protectedProcedure = t.procedure.use(enforceUserIsAuthed).use(csrfMiddleware)

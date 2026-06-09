@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { TRPCContext } from "@/server/trpc"
 
+const CSRF_TOKEN = "test-csrf-token"
+
 const prismaMock = vi.hoisted(() => {
   const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "count"]) => {
     const m: Record<string, ReturnType<typeof vi.fn>> = {}
@@ -10,6 +12,7 @@ const prismaMock = vi.hoisted(() => {
   return {
     user: model(),
     apiKey: model(),
+    $transaction: vi.fn((cb: (tx: Record<string, unknown>) => unknown) => cb({})),
   }
 })
 
@@ -21,7 +24,11 @@ function ctx(overrides?: Partial<TRPCContext>): TRPCContext {
   return { db: prismaMock as never, session: null, user: undefined, workspace: undefined, ...overrides }
 }
 function authed(userId = "user-1", plan = "FREE"): TRPCContext {
-  return ctx({ user: { id: userId, email: "u@t.com", name: "U", image: null, plan }, reqHeaders: { "x-csrf-token": "1" } })
+  return ctx({
+    user: { id: userId, email: "u@t.com", name: "U", image: null, plan },
+    session: { csrfToken: CSRF_TOKEN },
+    reqHeaders: { "x-csrf-token": CSRF_TOKEN },
+  })
 }
 
 describe("apiKeyRouter", () => {

@@ -2,6 +2,19 @@ import { z } from "zod"
 import { publicProcedure, protectedProcedure, router } from "@/server/trpc"
 import { authService } from "@/server/services/auth.service"
 
+/**
+ * Extrait l'adresse IP du client à partir des en-têtes de la requête.
+ * Utilise x-forwarded-for (proxy-aware) ou x-real-ip, avec fallback sur unknown.
+ */
+function extractClientIp(reqHeaders?: Record<string, string>): string | undefined {
+  if (!reqHeaders) return undefined
+  const forwarded = reqHeaders["x-forwarded-for"]
+  if (forwarded) {
+    return forwarded.split(",")[0]?.trim() ?? undefined
+  }
+  return reqHeaders["x-real-ip"] ?? undefined
+}
+
 const registerSchema = z.object({
   name: z.string().min(2, "Le nom doit contenir au moins 2 caractères"),
   email: z.string().email("Email invalide"),
@@ -71,14 +84,16 @@ export const authRouter = router({
 
   verifyTotpChallenge: publicProcedure
     .input(verifyChallengeSchema)
-    .mutation(async ({ input }) => {
-      return authService.verifyTotpChallenge(input.partialToken, input.token)
+    .mutation(async ({ ctx, input }) => {
+      const clientIp = extractClientIp(ctx.reqHeaders)
+      return authService.verifyTotpChallenge(input.partialToken, input.token, clientIp)
     }),
 
   verifyBackupCode: publicProcedure
     .input(verifyBackupCodeSchema)
-    .mutation(async ({ input }) => {
-      return authService.verifyBackupCode(input.partialToken, input.backupCode)
+    .mutation(async ({ ctx, input }) => {
+      const clientIp = extractClientIp(ctx.reqHeaders)
+      return authService.verifyBackupCode(input.partialToken, input.backupCode, clientIp)
     }),
 
   disableTotp: protectedProcedure

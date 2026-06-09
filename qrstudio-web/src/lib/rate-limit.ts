@@ -33,3 +33,10 @@ export const trpcQueryLimit = new Ratelimit({
   analytics: true,
   prefix: "@upstash/ratelimit/trpc/query",
 })
+
+export const totpRateLimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(5, "60 s"),
+  analytics: true,
+  prefix: "@upstash/ratelimit/totp",
+})

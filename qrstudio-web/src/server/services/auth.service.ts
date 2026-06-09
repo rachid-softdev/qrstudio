@@ -2,9 +2,11 @@ import bcrypt from "bcryptjs"
 import { TRPCError } from "@trpc/server"
 import * as Sentry from "@sentry/nextjs"
 import Stripe from "stripe"
+import type { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
 import { emailService } from "@/server/services/email.service"
 import { totpService } from "@/server/services/totp.service"
+import { totpRateLimit } from "@/lib/rate-limit"
 
 interface PartialTokenPayload {
   userId: string
@@ -84,30 +86,34 @@ export const authService = {
 
     const passwordHash = await bcrypt.hash(data.password, 12)
 
-    const user = await prisma.user.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        passwordHash,
-      },
-    })
-
     const slug = `ws_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
-    const workspace = await prisma.workspace.create({
-      data: {
-        name: `Espace de ${data.name}`,
-        slug,
-        ownerId: user.id,
-      },
-    })
+    const { user, workspace } = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: data.name,
+          email: data.email,
+          passwordHash,
+        },
+      })
 
-    await prisma.workspaceMember.create({
-      data: {
-        workspaceId: workspace.id,
-        userId: user.id,
-        role: "OWNER",
-      },
+      const workspace = await tx.workspace.create({
+        data: {
+          name: `Espace de ${data.name}`,
+          slug,
+          ownerId: user.id,
+        },
+      })
+
+      await tx.workspaceMember.create({
+        data: {
+          workspaceId: workspace.id,
+          userId: user.id,
+          role: "OWNER",
+        },
+      })
+
+      return { user, workspace }
     })
 
     // L'envoi d'email ne doit pas bloquer l'inscription
@@ -252,7 +258,7 @@ export const authService = {
       where: { id: userId },
       data: {
         totpEnabled: true,
-        totpBackupCodes: backupCodes as any,
+        totpBackupCodes: backupCodes as unknown as Prisma.InputJsonValue,
         totpVerifiedAt: new Date(),
       },
     })
@@ -260,7 +266,18 @@ export const authService = {
     return { backupCodes: plain }
   },
 
-  async verifyTotpChallenge(partialToken: string, token: string) {
+  async verifyTotpChallenge(partialToken: string, token: string, clientIp?: string) {
+    // Rate limiting: 5 tentatives par minute par IP
+    if (clientIp) {
+      const { success } = await totpRateLimit.limit(clientIp)
+      if (!success) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Trop de tentatives. Réessayez dans une minute.",
+        })
+      }
+    }
+
     const { userId } = await verifyPartialToken(partialToken)
 
     const user = await prisma.user.findUnique({ where: { id: userId } })
@@ -280,7 +297,18 @@ export const authService = {
     return { verified: true }
   },
 
-  async verifyBackupCode(partialToken: string, backupCode: string) {
+  async verifyBackupCode(partialToken: string, backupCode: string, clientIp?: string) {
+    // Rate limiting: 5 tentatives par minute par IP
+    if (clientIp) {
+      const { success } = await totpRateLimit.limit(clientIp)
+      if (!success) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Trop de tentatives. Réessayez dans une minute.",
+        })
+      }
+    }
+
     const { userId } = await verifyPartialToken(partialToken)
 
     const user = await prisma.user.findUnique({ where: { id: userId } })
@@ -300,7 +328,7 @@ export const authService = {
     codes[index].used = true
     await prisma.user.update({
       where: { id: user.id },
-      data: { totpBackupCodes: codes as any, totpVerifiedAt: new Date() },
+      data: { totpBackupCodes: codes as unknown as Prisma.InputJsonValue, totpVerifiedAt: new Date() },
     })
 
     return { verified: true }
@@ -322,7 +350,6 @@ export const authService = {
       data: {
         totpSecret: null,
         totpEnabled: false,
-        totpBackupCodes: null,
         totpVerifiedAt: null,
       },
     })
@@ -341,14 +368,13 @@ export const authService = {
 
 async function verifyPartialToken(partialToken: string): Promise<{ userId: string }> {
   try {
-    const { decode } = await import("jsonwebtoken")
-    const decoded = decode(partialToken) as PartialTokenPayload | null
-    if (!decoded || decoded.type !== "partial_auth") {
+    const { default: jwt } = await import("jsonwebtoken")
+    const secret = process.env.NEXTAUTH_SECRET
+    if (!secret) throw new Error("NEXTAUTH_SECRET not configured")
+
+    const decoded = jwt.verify(partialToken, secret) as PartialTokenPayload
+    if (decoded.type !== "partial_auth") {
       throw new Error("Token invalide")
-    }
-    const iat = decoded.iat ? decoded.iat * 1000 : 0
-    if (Date.now() - iat > 5 * 60 * 1000) {
-      throw new Error("Token expiré")
     }
     return { userId: decoded.userId }
   } catch (err) {

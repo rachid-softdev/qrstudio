@@ -1,3 +1,4 @@
+import crypto from "crypto"
 import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
 import Credentials from "next-auth/providers/credentials"
@@ -92,6 +93,7 @@ export const authConfig: NextAuthConfig = {
       // On initial signIn, set token from authorize return
       if (user) {
         token.id = user.id as string
+        token.csrfToken = crypto.randomUUID()
         if ((user as { needsTotp?: boolean }).needsTotp) {
           token.needsTotp = true
           token.partialToken = (user as { partialToken?: string }).partialToken
@@ -140,6 +142,7 @@ export const authConfig: NextAuthConfig = {
         session.user.needsTotp = (token.needsTotp as boolean) ?? false
         session.user.partialToken = token.partialToken as string | undefined
       }
+      session.csrfToken = token.csrfToken as string | undefined
       return session
     },
   },
