@@ -1,3 +1,4 @@
+import { z } from "zod"
 import type { QRType } from "@prisma/client"
 import type { QRUpdateInput } from "@/lib/validations"
 
@@ -7,6 +8,39 @@ export interface QRDataInput {
   wifi?: { ssid?: string; password?: string; encryption?: string } | undefined
   vcard?: { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string } | undefined
   textContent?: string | null
+}
+
+const metadataSchema = z.object({
+  destinationUrl: z.string().optional(),
+  wifi: z
+    .object({
+      ssid: z.string().optional(),
+      password: z.string().optional(),
+      encryption: z.string().optional(),
+    })
+    .optional(),
+  vcard: z
+    .object({
+      firstName: z.string().optional(),
+      lastName: z.string().optional(),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      company: z.string().optional(),
+      website: z.string().optional(),
+    })
+    .optional(),
+  textContent: z.string().optional(),
+})
+
+const wifiEncryptionSchema = z.enum(["WPA", "WEP", "nopass"])
+
+const qrTypeSchema = z.enum([
+  "URL", "WHATSAPP", "WIFI", "VCARD", "PDF", "TEXT", "LANDING_PAGE",
+])
+
+function parseMetadata(raw: unknown): z.infer<typeof metadataSchema> {
+  const parsed = metadataSchema.safeParse(raw)
+  return parsed.success ? parsed.data : {}
 }
 
 /**
@@ -64,53 +98,54 @@ export function toQRDataInput(
     metadata: unknown
   },
 ): QRDataInput {
-  const metadata = (entity.metadata as Record<string, unknown>) ?? {}
+  const meta = parseMetadata(entity.metadata)
+  const qrType = qrTypeSchema.safeParse(entity.type)
   return {
-    type: entity.type as QRType,
-    destinationUrl: (metadata.destinationUrl as string | undefined) ?? undefined,
-    wifi: metadata.wifi as { ssid?: string; password?: string; encryption?: string } | undefined,
-    vcard: metadata.vcard as { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string } | undefined,
-    textContent: (metadata.textContent as string | undefined) ?? undefined,
+    type: qrType.success ? qrType.data : entity.type,
+    destinationUrl: meta.destinationUrl,
+    wifi: meta.wifi,
+    vcard: meta.vcard,
+    textContent: meta.textContent,
   }
 }
 
 export function prepareQRDataForUpdate(existing: { type: string; shortCode?: string; metadata?: unknown }, data: QRUpdateInput): string {
-  const type = existing.type as QRType
-  const meta = existing.metadata as Record<string, unknown> | null | undefined
+  const qrType = qrTypeSchema.safeParse(existing.type)
+  const type: string = qrType.success ? qrType.data : existing.type
+  const meta = parseMetadata(existing.metadata)
 
   switch (type) {
     case 'URL': {
-      const dest = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
-      return dest
+      return data.destinationUrl ?? meta.destinationUrl ?? ''
     }
     case 'WHATSAPP': {
-      const phone = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
+      const phone = data.destinationUrl ?? meta.destinationUrl ?? ''
       return `https://wa.me/${phone.replace(/[^0-9]/g, '')}`
     }
     case 'WIFI': {
-      const wifiMeta = meta?.wifi as Record<string, string> | undefined
-      const ssid = data.wifi?.ssid ?? wifiMeta?.ssid ?? ''
-      const password = data.wifi?.password ?? wifiMeta?.password ?? undefined
-      const encryption = (data.wifi?.encryption ?? wifiMeta?.encryption ?? 'nopass') as 'WPA' | 'WEP' | 'nopass'
+      const ssid = data.wifi?.ssid ?? meta.wifi?.ssid ?? ''
+      const password = data.wifi?.password ?? meta.wifi?.password
+      const encryption = wifiEncryptionSchema.parse(
+        data.wifi?.encryption ?? meta.wifi?.encryption ?? 'nopass',
+      )
       return formatWifiString(ssid, password, encryption)
     }
     case 'VCARD': {
       if (data.vcard) return formatVCardString(data.vcard)
-      const vcardMeta = meta?.vcard as Record<string, string> | undefined
-      return vcardMeta ? formatVCardString(vcardMeta) : ''
+      return meta.vcard ? formatVCardString(meta.vcard) : ''
     }
     case 'PDF': {
-      const dest = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
-      return dest
+      return data.destinationUrl ?? meta.destinationUrl ?? ''
     }
     case 'TEXT': {
-      const text = data.textContent ?? (meta?.textContent as string | undefined) ?? ''
-      return text
+      return data.textContent ?? meta.textContent ?? ''
     }
     case 'LANDING_PAGE': {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
       return `${appUrl}/l/${existing.shortCode ?? 'unknown'}`
     }
+    default:
+      return ''
   }
 }
 

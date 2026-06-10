@@ -32,6 +32,10 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().url().optional(),
   NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
 
+  // ─── Security ──────────────────────────────────────────────────────────────
+  TOTP_ENCRYPTION_KEY: z.string().min(1, "TOTP_ENCRYPTION_KEY requise pour le chiffrement TOTP").optional(),
+  IP_HASH_SECRET: z.string().min(1, "IP_HASH_SECRET requis pour le hachage IP").optional(),
+
   // ─── App ──────────────────────────────────────────────────────────────────
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   VERCEL_URL: z.string().optional(),
@@ -67,7 +71,7 @@ export function validateEnv(): Env {
       const criticalMissing = result.error.issues.filter(
         (issue) =>
           issue.message.includes("Required") &&
-          ["NEXTAUTH_SECRET", "DATABASE_URL"].includes(issue.path.join(".")),
+          ["NEXTAUTH_SECRET", "DATABASE_URL", "TOTP_ENCRYPTION_KEY", "IP_HASH_SECRET"].includes(issue.path.join(".")),
       )
       if (criticalMissing.length > 0) {
         throw new Error(summary)
