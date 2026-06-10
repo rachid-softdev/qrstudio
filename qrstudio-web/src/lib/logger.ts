@@ -19,6 +19,7 @@ const logger = pino({
       "authorization",
       "cookie",
       "token",
+      "sessionToken",
       "accessToken",
       "refreshToken",
     ],

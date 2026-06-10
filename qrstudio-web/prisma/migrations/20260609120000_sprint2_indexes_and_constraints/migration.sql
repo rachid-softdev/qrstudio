@@ -8,17 +8,19 @@ DROP INDEX IF EXISTS "Scan_qrCodeId_idx";
 DROP INDEX IF EXISTS "Scan_qrCodeId_ipHash_idx";
 
 -- Create composite index: workspace-scoped queries sorted by creation date
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "QRCode_workspaceId_createdAt_idx"
+-- NOTE: CONCURRENTLY is omitted because Prisma wraps migrations in a transaction.
+-- In production, run these manually with CONCURRENTLY during off-peak, or accept
+-- the brief ACCESS EXCLUSIVE lock (table is small for most tenants).
+CREATE INDEX IF NOT EXISTS "QRCode_workspaceId_createdAt_idx"
   ON "QRCode" ("workspaceId", "createdAt" DESC);
 
 -- Create composite index: scan queries filtered by QR code, sorted by time, with IP dedup
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "Scan_qrCodeId_scannedAt_ipHash_idx"
+CREATE INDEX IF NOT EXISTS "Scan_qrCodeId_scannedAt_ipHash_idx"
   ON "Scan" ("qrCodeId", "scannedAt", "ipHash");
 
 -- GIN trigram index for LIKE / ILIKE searches on QRCode name
--- Requires: CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "QRCode_name_trgm_idx"
+CREATE INDEX IF NOT EXISTS "QRCode_name_trgm_idx"
   ON "QRCode" USING gin ("name" gin_trgm_ops);
 
 -- CHECK constraints for data integrity
