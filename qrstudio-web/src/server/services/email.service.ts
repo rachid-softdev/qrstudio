@@ -174,3 +174,36 @@ export const emailService = {
     }
   },
 }
+
+export async function sendDowngradeNotification(email: string, name?: string): Promise<void> {
+  const client = createResendClient()
+  if (!client) return
+
+  try {
+    await withBreaker(resendBreaker, () =>
+      withRetry(() =>
+        client.emails.send({
+          from: FROM_ADDRESS,
+          to: email,
+          subject: "Votre abonnement QR Studio est terminé",
+          html: wrapHtml(`
+            <h1>Retour au plan Gratuit</h1>
+            <p>${name ? `Bonjour ${escapeHtml(name)},` : "Bonjour,"}</p>
+            <p>Votre abonnement payant est arrivé à son terme. Vous êtes désormais sur le plan <strong>Gratuit</strong>.</p>
+            <p>Tous vos QR codes restent actifs et accessibles. Les fonctionnalités avancées (analytiques étendues, accès API, domaine personnalisé) ne sont plus disponibles.</p>
+            <p>Pour retrouver l'accès à ces fonctionnalités, vous pouvez souscrire à un nouvel abonnement à tout moment.</p>
+            <p style="text-align:center;margin-top:24px;">
+              <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/billing" style="display:inline-block;background:#6366f1;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
+                Voir les offres
+              </a>
+            </p>
+          `),
+        }),
+        { maxRetries: 3, baseDelay: 500 },
+      ),
+    )
+  } catch (error) {
+    logger.error(error, "Erreur envoi email rétrogradation")
+    Sentry.captureException(error)
+  }
+}

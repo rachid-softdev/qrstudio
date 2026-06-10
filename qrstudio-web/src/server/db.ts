@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client"
 import { validateEnv } from "@/lib/env"
+import { DATABASE } from "@/lib/constants"
 
 // Valider les variables d'environnement au démarrage (premier module serveur chargé)
 validateEnv()
@@ -8,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-const QUERY_TIMEOUT_MS = 15_000 // 15 secondes
+const QUERY_TIMEOUT_MS = DATABASE.QUERY_TIMEOUT_MS
 
 /**
  * Prisma client singleton avec middleware de timeout.

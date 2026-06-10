@@ -1,3 +1,4 @@
+import { randomInt } from "crypto"
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
@@ -30,15 +31,7 @@ export function truncate(str: string, max: number): string {
 const CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 function getRandomInt(max: number): number {
-  // Utilise crypto.getRandomValues (Web Crypto API, disponible partout)
-  const array = new Uint32Array(1)
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    crypto.getRandomValues(array)
-  } else {
-    // Fallback pour les environnements sans Web Crypto (ne devrait pas arriver)
-    array[0] = Math.floor(Math.random() * 0xffffffff)
-  }
-  return array[0] % max
+  return randomInt(0, max)
 }
 
 export function sleep(ms: number): Promise<void> {

@@ -1,16 +1,7 @@
 import Stripe from "stripe"
 import { NextResponse } from "next/server"
 import { billingService } from "@/server/services/billing.service"
-
-function getStripe(): Stripe {
-  const secretKey = process.env.STRIPE_SECRET_KEY
-  if (!secretKey) {
-    throw new Error("STRIPE_SECRET_KEY non configuré")
-  }
-  return new Stripe(secretKey, {
-    apiVersion: "2026-05-27.dahlia",
-  })
-}
+import { getStripeClient } from "@/lib/stripe"
 
 function getWebhookSecret(): string {
   return process.env.STRIPE_WEBHOOK_SECRET ?? ""
@@ -31,7 +22,7 @@ export async function POST(request: Request) {
   let event: Stripe.Event
 
   try {
-    event = getStripe().webhooks.constructEvent(body, signature, webhookSecret)
+    event = getStripeClient().webhooks.constructEvent(body, signature, webhookSecret)
   } catch {
     return NextResponse.json(
       { error: "Signature invalide" },

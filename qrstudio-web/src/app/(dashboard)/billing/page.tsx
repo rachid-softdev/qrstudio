@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { auth } from "@/server/auth"
 import { redirect } from "next/navigation"
 import { prisma } from "@/server/db"
-import Stripe from "stripe"
+import { getStripeClient } from "@/lib/stripe"
 import { Header } from "@/components/layout/header"
 import { CurrentPlanBanner } from "@/components/billing/current-plan-banner"
 import { PlanCardsGrid } from "@/components/billing/plan-cards-grid"
@@ -14,15 +14,7 @@ export const metadata: Metadata = {
   description: "Gérez votre abonnement QR Studio",
 }
 
-function getStripe(): Stripe {
-  const secretKey = process.env.STRIPE_SECRET_KEY
-  if (!secretKey) {
-    throw new Error("STRIPE_SECRET_KEY non configuré")
-  }
-  return new Stripe(secretKey, {
-    apiVersion: "2026-05-27.dahlia",
-  })
-}
+
 
 export default async function BillingPage() {
   const session = await auth()
@@ -53,7 +45,7 @@ export default async function BillingPage() {
 
   if (user.stripeSubscriptionId && user.plan !== "FREE") {
     try {
-      const sub = await getStripe().subscriptions.retrieve(user.stripeSubscriptionId)
+      const sub = await getStripeClient().subscriptions.retrieve(user.stripeSubscriptionId)
       const item = sub.items.data[0]
       subscription = {
         plan: user.plan,

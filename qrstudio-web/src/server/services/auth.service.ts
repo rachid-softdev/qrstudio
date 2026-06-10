@@ -1,21 +1,21 @@
 import bcrypt from "bcryptjs"
 import { TRPCError } from "@trpc/server"
 import * as Sentry from "@sentry/nextjs"
-import Stripe from "stripe"
+import { sign, verify } from "jsonwebtoken"
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
 import { emailService } from "@/server/services/email.service"
 import { totpService } from "@/server/services/totp.service"
+import { getStripeClient } from "@/lib/stripe"
 import { checkTotpRateLimit } from "@/lib/rate-limit"
+import { passwordSchema } from "@/lib/validations"
+import { AUTH } from "@/lib/constants"
 
 interface PartialTokenPayload {
   userId: string
   type: string
   iat?: number
 }
-
-const MAX_LOGIN_ATTEMPTS = 5
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000 // 15 minutes
 
 export const authService = {
   async checkLockout(email: string): Promise<void> {
@@ -48,12 +48,12 @@ export const authService = {
     })
     if (!user) return
     const newAttempts = user.loginAttempts + 1
-    if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+    if (newAttempts >= AUTH.MAX_LOGIN_ATTEMPTS) {
       await prisma.user.update({
         where: { email },
         data: {
           loginAttempts: newAttempts,
-          lockoutUntil: new Date(Date.now() + LOCKOUT_DURATION_MS),
+          lockoutUntil: new Date(Date.now() + AUTH.LOCKOUT_DURATION_MS),
         },
       })
     } else {
@@ -72,6 +72,8 @@ export const authService = {
   },
 
   async register(data: { name: string; email: string; password: string }) {
+    passwordSchema.parse(data.password)
+
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email },
       select: { id: true },
@@ -148,6 +150,8 @@ export const authService = {
   },
 
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    passwordSchema.parse(newPassword)
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { passwordHash: true, email: true },
@@ -209,8 +213,7 @@ export const authService = {
     // Annuler l'abonnement Stripe si actif
     if (user.stripeSubscriptionId) {
       try {
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "")
-        await stripe.subscriptions.cancel(user.stripeSubscriptionId)
+        await getStripeClient().subscriptions.cancel(user.stripeSubscriptionId)
       } catch {
         Sentry.captureException(
           new Error("Échec annulation abonnement Stripe")
@@ -235,8 +238,8 @@ export const authService = {
     if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable" })
     if (user.totpEnabled) throw new TRPCError({ code: "FORBIDDEN", message: "TOTP déjà activé" })
 
-    const { secret, uri } = totpService.generateSecret()
-    await prisma.user.update({ where: { id: userId }, data: { totpSecret: secret } })
+    const { secret, encryptedSecret, uri } = totpService.generateSecret()
+    await prisma.user.update({ where: { id: userId }, data: { totpSecret: encryptedSecret } })
 
     return { secret, uri }
   },
@@ -358,21 +361,19 @@ export const authService = {
   },
 
   async createPartialAuthToken(userId: string): Promise<string> {
-    const { default: jwt } = await import("jsonwebtoken")
     const secret = process.env.NEXTAUTH_SECRET
     if (!secret) throw new Error("NEXTAUTH_SECRET not configured")
 
-    return jwt.sign({ userId, type: "partial_auth" }, secret, { expiresIn: "5m" })
+    return sign({ userId, type: "partial_auth" }, secret, { expiresIn: AUTH.PARTIAL_TOKEN_TTL })
   },
 }
 
 async function verifyPartialToken(partialToken: string): Promise<{ userId: string }> {
   try {
-    const { default: jwt } = await import("jsonwebtoken")
     const secret = process.env.NEXTAUTH_SECRET
     if (!secret) throw new Error("NEXTAUTH_SECRET not configured")
 
-    const decoded = jwt.verify(partialToken, secret) as PartialTokenPayload
+    const decoded = verify(partialToken, secret) as PartialTokenPayload
     if (decoded.type !== "partial_auth") {
       throw new Error("Token invalide")
     }

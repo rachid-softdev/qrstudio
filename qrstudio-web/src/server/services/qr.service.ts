@@ -393,6 +393,58 @@ export const qrService = {
     }
   },
 
+  /**
+   * Refresh WorkspaceQRStats for a given workspace.
+   * Called after QR code creates, updates, deletes, or plan changes.
+   */
+  async refreshWorkspaceStats(workspaceId: string): Promise<void> {
+    try {
+      const stats = await prisma.qRCode.aggregate({
+        where: { workspaceId, deletedAt: null },
+        _count: true,
+        _sum: { totalScans: true },
+      })
+
+      const byType = await prisma.qRCode.groupBy({
+        by: ["status", "type"],
+        where: { workspaceId, deletedAt: null },
+        _count: true,
+      })
+
+      const activeCount = byType.find(g => g.status === "ACTIVE")?._count ?? 0
+      const pausedCount = byType.find(g => g.status === "PAUSED")?._count ?? 0
+      const urlCount = byType.find(g => g.type === "URL")?._count ?? 0
+      const landingCount = byType.find(g => g.type === "LANDING_PAGE")?._count ?? 0
+      const otherCount = stats._count - urlCount - landingCount
+
+      await prisma.workspaceQRStats.upsert({
+        where: { workspaceId },
+        create: {
+          workspaceId,
+          totalQRCount: stats._count,
+          activeCount,
+          pausedCount,
+          urlCount,
+          landingCount,
+          otherCount,
+          totalScans: stats._sum.totalScans ?? 0,
+        },
+        update: {
+          totalQRCount: stats._count,
+          activeCount,
+          pausedCount,
+          urlCount,
+          landingCount,
+          otherCount,
+          totalScans: stats._sum.totalScans ?? 0,
+        },
+      })
+    } catch (error) {
+      logger.error(error, "Échec refresh WorkspaceQRStats")
+      throw error
+    }
+  },
+
   prepareQRDataFromEntity(
     entity: {
       type: string

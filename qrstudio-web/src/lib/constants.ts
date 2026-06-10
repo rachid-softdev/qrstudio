@@ -13,3 +13,14 @@ export const MAX_FILE_SIZE = {
   LOGO: 500 * 1024,
   PDF: 10 * 1024 * 1024,
 }
+
+export const AUTH = {
+  MAX_LOGIN_ATTEMPTS: 5,
+  LOCKOUT_DURATION_MS: 15 * 60 * 1000,
+  PARTIAL_TOKEN_TTL: "5m",
+  TOTP_ISSUER: "QR Studio",
+} as const
+
+export const DATABASE = {
+  QUERY_TIMEOUT_MS: 15_000,
+} as const

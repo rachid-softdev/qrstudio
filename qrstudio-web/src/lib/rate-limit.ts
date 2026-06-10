@@ -44,6 +44,13 @@ const totpRateLimit = new Ratelimit({
   prefix: "@upstash/ratelimit/totp",
 })
 
+const registerRateLimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(3, "1 h"),
+  analytics: true,
+  prefix: "@upstash/ratelimit/register",
+})
+
 /**
  * Wrapped rate limit check with circuit breaker and retry.
  * Falls back to allowing the request if Redis is unreachable.
@@ -98,4 +105,11 @@ export async function checkTotpRateLimit(
   identifier: string,
 ): Promise<{ success: boolean; remaining: number; limit: number; reset: number }> {
   return limitWithFallback(totpRateLimit, identifier)
+}
+
+/** Register rate limit (3/hour/IP) with retry + circuit breaker fallback */
+export async function checkRegisterRateLimit(
+  identifier: string,
+): Promise<{ success: boolean; remaining: number; limit: number; reset: number }> {
+  return limitWithFallback(registerRateLimit, identifier)
 }

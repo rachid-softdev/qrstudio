@@ -4,7 +4,7 @@ import { getCountry } from "@/lib/geo"
 import { parseDevice, parseOs, parseBrowser } from "@/lib/user-agent"
 import { withRetry } from "@/lib/retry"
 import logger from "@/lib/logger"
-import { createHash } from "crypto"
+import { hashIp } from "@/lib/ip"
 import {
   readWithCache,
   invalidateAnalyticsCache,
@@ -32,10 +32,6 @@ export interface CSVPageResult {
 }
 
 export type Period = '7d' | '30d' | '90d' | 'all'
-
-function hashIp(ip: string): string {
-  return createHash('sha256').update(ip).digest('hex')
-}
 
 function getPeriodDate(period: Period): Date | null {
   if (period === 'all') return null
@@ -103,7 +99,7 @@ export const analyticsService = {
   // ── Write path (unchanged) ──────────────────────────────────────────────────
 
   async recordScan(data: ScanInput): Promise<void> {
-    const ipHash = data.ip ? hashIp(data.ip) : null
+    const ipHash = data.ip ? await hashIp(data.ip) : null
     let country: string | null = null
 
     if (data.ip) {

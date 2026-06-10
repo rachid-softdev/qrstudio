@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/server/db"
-import Stripe from "stripe"
+import { getStripeClient } from "@/lib/stripe"
 
 export async function GET() {
   const checks: Record<string, { status: string; error?: string }> = {}
@@ -14,8 +14,7 @@ export async function GET() {
 
   if (process.env.STRIPE_SECRET_KEY) {
     try {
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2026-05-27.dahlia" })
-      await stripe.balance.retrieve()
+      await getStripeClient().balance.retrieve()
       checks.stripe = { status: "ok" }
     } catch (e) {
       checks.stripe = { status: "error", error: String(e) }

@@ -1,18 +1,22 @@
 import { z } from "zod"
+import { TRPCError } from "@trpc/server"
 import { publicProcedure, protectedProcedure, router } from "@/server/trpc"
 import { authService } from "@/server/services/auth.service"
+import { checkRegisterRateLimit } from "@/lib/rate-limit"
+import { getClientIp } from "@/lib/ip"
 
 /**
  * Extrait l'adresse IP du client à partir des en-têtes de la requête.
- * Utilise x-forwarded-for (proxy-aware) ou x-real-ip, avec fallback sur unknown.
+ * Délègue à getClientIp() pour une extraction fiable (proxy-aware).
  */
 function extractClientIp(reqHeaders?: Record<string, string>): string | undefined {
   if (!reqHeaders) return undefined
-  const forwarded = reqHeaders["x-forwarded-for"]
-  if (forwarded) {
-    return forwarded.split(",")[0]?.trim() ?? undefined
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(reqHeaders)) {
+    headers.set(key, value)
   }
-  return reqHeaders["x-real-ip"] ?? undefined
+  const ip = getClientIp({ headers })
+  return ip === "unknown" ? undefined : ip
 }
 
 const registerSchema = z.object({
@@ -50,7 +54,17 @@ const disableTotpSchema = z.object({
 })
 
 export const authRouter = router({
-  register: publicProcedure.input(registerSchema).mutation(async ({ input }) => {
+  register: publicProcedure.input(registerSchema).mutation(async ({ ctx, input }) => {
+    const clientIp = extractClientIp(ctx.reqHeaders)
+    if (clientIp) {
+      const { success } = await checkRegisterRateLimit(clientIp)
+      if (!success) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Trop de tentatives d'inscription. Réessayez dans une heure.",
+        })
+      }
+    }
     return authService.register(input)
   }),
 

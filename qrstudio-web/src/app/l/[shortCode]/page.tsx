@@ -2,6 +2,7 @@ import { notFound } from "next/navigation"
 import { prisma } from "@/server/db"
 import { getQueue, QUEUE_NAMES } from "@/server/queue"
 import { headers } from "next/headers"
+import { getClientIp } from "@/lib/ip"
 import type { Metadata } from "next"
 
 interface Props {
@@ -50,7 +51,7 @@ export default async function LandingPageView({ params }: Props) {
 
   // Enregistrer le scan de manière asynchrone via la file d'attente
   const headersList = await headers()
-  const ip = headersList.get("x-forwarded-for") ?? headersList.get("x-real-ip") ?? undefined
+  const ip = getClientIp({ headers: new Headers(Array.from(headersList.entries())) })
   const userAgent = headersList.get("user-agent") ?? undefined
   const referer = headersList.get("referer") ?? undefined
 

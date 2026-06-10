@@ -282,6 +282,24 @@ model ApiKey {
   @@index([userId])
 }
 
+// ─── Workspace QR Code Stats ────────────────────────────────────────────────
+// Materialized aggregate: one row per workspace, updated by backfill and
+// refreshed on plan/status changes.
+model WorkspaceQRStats {
+  id            String   @id @default(cuid())
+  workspaceId   String   @unique
+  totalQRCount  Int      @default(0)
+  activeCount   Int      @default(0)
+  pausedCount   Int      @default(0)
+  urlCount      Int      @default(0)
+  landingCount  Int      @default(0)
+  otherCount    Int      @default(0)
+  totalScans    Int      @default(0)
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
 // ─── Webhook Idempotency ─────────────────────────────────────────────────────
 
 model WebhookEvent {

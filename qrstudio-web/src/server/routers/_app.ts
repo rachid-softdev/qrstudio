@@ -4,6 +4,7 @@ import { qrRouter } from "@/server/routers/qr"
 import { teamRouter } from "@/server/routers/team"
 import { billingRouter } from "@/server/routers/billing"
 import { apiKeyRouter } from "@/server/routers/apiKey"
+import { workspaceRouter } from "@/server/routers/workspace"
 
 export const appRouter = router({
   auth: authRouter,
@@ -11,6 +12,7 @@ export const appRouter = router({
   team: teamRouter,
   billing: billingRouter,
   apiKey: apiKeyRouter,
+  workspace: workspaceRouter,
 })
 
 export type AppRouter = typeof appRouter

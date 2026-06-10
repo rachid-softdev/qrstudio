@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
+import { getClientIp } from "@/lib/ip"
 import {
   checkQrRateLimit,
   checkAuthRateLimit,
@@ -28,8 +29,7 @@ function addRequestId(response: NextResponse, requestId: string): NextResponse {
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const requestId = crypto.randomUUID()
   const url = request.nextUrl.pathname
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
+  const ip = getClientIp(request)
 
   if (url.startsWith("/api/v1/")) {
     const newUrl = url.replace("/api/v1/", "/api/")
