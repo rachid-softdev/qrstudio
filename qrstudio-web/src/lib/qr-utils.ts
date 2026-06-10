@@ -1,20 +1,49 @@
+import { z } from "zod"
 import type { QRType } from "@/types/index"
 
+const contentSchema = z.object({
+  destinationUrl: z.string().optional(),
+  wifi: z
+    .object({
+      ssid: z.string(),
+      password: z.string().optional(),
+      encryption: z.string().optional(),
+    })
+    .optional(),
+  vcard: z
+    .object({
+      firstName: z.string().optional(),
+      lastName: z.string().optional(),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      company: z.string().optional(),
+      website: z.string().optional(),
+    })
+    .optional(),
+  textContent: z.string().optional(),
+})
+
+function parseContent(raw: Record<string, unknown>): z.infer<typeof contentSchema> {
+  const parsed = contentSchema.safeParse(raw)
+  return parsed.success ? parsed.data : {}
+}
+
 export function computeQRData(type: QRType, content: Record<string, unknown>): string {
+  const data = parseContent(content)
   switch (type) {
     case "URL":
-      return (content.destinationUrl as string) ?? ""
+      return data.destinationUrl ?? ""
     case "WHATSAPP": {
-      const phone = (content.destinationUrl as string) ?? ""
+      const phone = data.destinationUrl ?? ""
       return `https://wa.me/${phone.replace(/[^0-9]/g, "")}`
     }
     case "WIFI": {
-      const wifi = content.wifi as { ssid?: string; password?: string; encryption?: string } | undefined
+      const wifi = data.wifi
       if (!wifi?.ssid) return ""
       return `WIFI:T:${wifi.encryption ?? "nopass"};S:${wifi.ssid};${wifi.password ? `P:${wifi.password};` : ""}`
     }
     case "VCARD": {
-      const vcard = content.vcard as { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string } | undefined
+      const vcard = data.vcard
       if (!vcard?.firstName && !vcard?.lastName) return ""
       const lines = ["BEGIN:VCARD", "VERSION:3.0"]
       if (vcard.firstName || vcard.lastName) {
@@ -29,9 +58,9 @@ export function computeQRData(type: QRType, content: Record<string, unknown>): s
       return lines.join("\n")
     }
     case "PDF":
-      return (content.destinationUrl as string) ?? ""
+      return data.destinationUrl ?? ""
     case "TEXT":
-      return (content.textContent as string) ?? ""
+      return data.textContent ?? ""
     case "LANDING_PAGE":
       return `page_${Date.now()}`
   }

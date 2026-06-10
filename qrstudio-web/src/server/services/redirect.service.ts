@@ -1,5 +1,10 @@
+import { z } from "zod"
 import type { QRType, QRStatus } from "@prisma/client"
 import { isSafeRedirectUrl } from "@/lib/url-security"
+
+const metadataSchema = z.object({
+  destinationUrl: z.string().optional(),
+})
 
 export interface QRCodeRecord {
   shortCode: string
@@ -9,13 +14,18 @@ export interface QRCodeRecord {
   deletedAt: Date | null
 }
 
+function parseMetadata(raw: unknown): z.infer<typeof metadataSchema> {
+  const parsed = metadataSchema.safeParse(raw)
+  return parsed.success ? parsed.data : {}
+}
+
 export function resolveDestination(qrCode: QRCodeRecord): string {
   if (qrCode.deletedAt) {
     return '/qr-deleted'
   }
 
-  const metadata = (qrCode.metadata as Record<string, unknown>) ?? {}
-  const destinationUrl = (metadata.destinationUrl as string | undefined) ?? null
+  const metadata = parseMetadata(qrCode.metadata)
+  const destinationUrl = metadata.destinationUrl ?? null
 
   switch (qrCode.type) {
     case 'URL':

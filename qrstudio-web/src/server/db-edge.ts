@@ -10,6 +10,11 @@ import { withAccelerate } from "@prisma/extension-accelerate"
  * Uses DATABASE_URL_UNPOOLED for HTTP connection pooling.
  * This client is not cached as a singleton — Edge Functions should
  * create a fresh instance per request for optimal cold start.
+ *
+ * SÉCURITÉ : le cast `as unknown as PrismaClient` est intentionnel.
+ * Prisma Accelerate retourne un proxy compatible PrismaClient mais
+ * avec un type différent. Le typage partiel est volontaire — ne pas
+ * remplacer par `as any`.
  */
 export function createEdgePrismaClient(): PrismaClient {
   const client = new PrismaClient({
