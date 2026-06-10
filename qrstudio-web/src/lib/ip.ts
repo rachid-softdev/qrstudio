@@ -5,7 +5,7 @@ function getIpHashSecret(): string {
   if (!ipHashSecret) {
     ipHashSecret = process.env.IP_HASH_SECRET ?? ""
     if (!ipHashSecret) {
-      console.warn("[ip] IP_HASH_SECRET not set — using fallback derivation (less secure)")
+      console.warn("[ip] IP_HASH_SECRET non défini — utilisation d'une dérivation de secours (moins sécurisé)")
       ipHashSecret = "qr-studio-fallback-secret-do-not-use-in-production"
     }
   }

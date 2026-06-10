@@ -21,13 +21,13 @@ function createBreaker(
   const breaker = new CircuitBreaker(fn, { ...defaults, ...opts })
 
   breaker.on("open", () =>
-    logger.warn({ breaker: opts.name }, "Circuit breaker opened"),
+    logger.warn({ breaker: opts.name }, "Circuit breaker ouvert"),
   )
   breaker.on("halfOpen", () =>
-    logger.warn({ breaker: opts.name }, "Circuit breaker half-open"),
+    logger.warn({ breaker: opts.name }, "Circuit breaker entrouvert"),
   )
   breaker.on("close", () =>
-    logger.info({ breaker: opts.name }, "Circuit breaker closed"),
+    logger.info({ breaker: opts.name }, "Circuit breaker fermé"),
   )
 
   return breaker

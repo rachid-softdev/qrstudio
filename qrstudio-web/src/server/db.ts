@@ -31,7 +31,7 @@ function createPrismaClient(): PrismaClient {
       next(params),
       new Promise<never>((_, reject) =>
         setTimeout(
-          () => reject(new Error(`Prisma query timeout (${QUERY_TIMEOUT_MS}ms): ${params.model}.${params.action}`)),
+          () => reject(new Error(`Prisma requête expirée (${QUERY_TIMEOUT_MS}ms) : ${params.model}.${params.action}`)),
           QUERY_TIMEOUT_MS,
         ),
       ),

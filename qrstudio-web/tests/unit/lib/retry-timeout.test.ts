@@ -50,7 +50,7 @@ describe("withRetry — Prisma Query Timeout", () => {
     await expect(promise).rejects.toThrow(RetryError)
     // The underlying cause should mention timeout
     const retryError = await promise.catch((e: unknown) => e) as RetryError
-    expect(retryError.cause?.message).toMatch(/timed?/i)
+    expect(retryError.cause?.message).toMatch(/expir(e|ée)/i)
   }, 5000)
 
   // ─── Normal queries still work ────────────────────────────────────────────

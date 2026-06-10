@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server"
 import { workspaceProcedure, router, requireWorkspaceAccess } from "@/server/trpc"
 import { prisma } from "@/server/db"
 import { qrService } from "@/server/services/qr.service"
-import { analyticsService } from "@/server/services/analytics.service"
+import { analyticsService, analyticsExportService } from "@/server/services/analytics.service"
 import { QRCreateSchema, QRUpdateSchema } from "@/lib/validations"
 import { generateQRSvg, generateQrPngBuffer, generateQrPdfBuffer } from "@/lib/qr-generator"
 import type { QRStatus } from "@prisma/client"
@@ -100,16 +100,6 @@ export const qrRouter = router({
     .input(QRCreateSchema)
     .mutation(async ({ ctx, input }) => {
       await workspaceQuery(ctx, input.workspaceId)
-      const workspace = await prisma.workspace.findUnique({
-        where: { id: input.workspaceId },
-        select: { ownerId: true, owner: { select: { plan: true } } },
-      })
-
-      if (!workspace) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Espace de travail introuvable' })
-      }
-
-      await qrService.checkPlanLimit(input.workspaceId, workspace.owner.plan)
       return qrService.create(input)
     }),
 
@@ -217,7 +207,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      return analyticsService.exportCSV(input.qrCodeId, input.period)
+      return analyticsExportService.exportCSV(input.qrCodeId, input.period)
     }),
 
   exportCsvPage: workspaceProcedure
@@ -237,7 +227,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      return analyticsService.exportCSVPage(input.qrCodeId, input.period, input.cursor)
+      return analyticsExportService.exportCSVPage(input.qrCodeId, input.period, input.cursor)
     }),
 
   exportSvg: workspaceProcedure

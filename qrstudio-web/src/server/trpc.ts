@@ -1,10 +1,20 @@
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
+import { z } from "zod"
 import { auth } from "@/server/auth"
 import { prisma } from "@/server/db"
 import logger from "@/lib/logger"
 import type { PrismaClient } from "@prisma/client"
 import type { Logger } from "pino"
+
+const sessionUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string().nullable().optional(),
+  image: z.string().nullable().optional(),
+  plan: z.string().optional().default("FREE"),
+  totpEnabled: z.boolean().optional().default(false),
+})
 
 export interface TRPCContext {
   db: PrismaClient
@@ -41,18 +51,24 @@ export async function createTRPCContext(opts?: { headers: Headers }): Promise<TR
   // so this will typically generate a fresh UUID per tRPC call.
   const requestId = headers["x-request-id"] ?? crypto.randomUUID()
 
+  let user: TRPCContext["user"] = undefined
+  if (session?.user) {
+    const parsed = sessionUserSchema.safeParse(session.user)
+    if (parsed.success) {
+      user = {
+        id: parsed.data.id,
+        email: parsed.data.email,
+        name: parsed.data.name ?? null,
+        image: parsed.data.image ?? null,
+        plan: parsed.data.plan,
+      }
+    }
+  }
+
   return {
     db: prisma,
     session,
-    user: session?.user
-      ? {
-          id: session.user.id as string,
-          email: session.user.email as string,
-          name: (session.user.name as string) ?? null,
-          image: (session.user.image as string) ?? null,
-          plan: (session.user.plan as string) ?? "FREE",
-        }
-      : undefined,
+    user,
     reqHeaders: headers,
     requestId,
   }

@@ -2,6 +2,7 @@ import type Stripe from "stripe"
 import type { PrismaTx } from "../billing.service"
 import { mapStripePlanToPlan } from "../billing.service"
 import { sendDowngradeNotification } from "../email.service"
+import logger from "@/lib/logger"
 
 export async function handleSubscriptionUpdated(event: Stripe.Event, tx: PrismaTx): Promise<void> {
   const subscription = event.data.object as Stripe.Subscription
@@ -32,6 +33,7 @@ export async function handleSubscriptionUpdated(event: Stripe.Event, tx: PrismaT
 
   // Send downgrade notification if needed
   if (currentUser && currentUser.plan !== "FREE" && plan === "FREE") {
-    await sendDowngradeNotification(currentUser.email, currentUser.name ?? undefined)
+    sendDowngradeNotification(currentUser.email, currentUser.name ?? undefined)
+      .catch((err) => logger.error(err, "Échec notification rétrogradation (ignoré)"))
   }
 }

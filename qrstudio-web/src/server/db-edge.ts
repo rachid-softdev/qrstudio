@@ -1,3 +1,7 @@
+// UTILISÉ PAR : src/app/api/qr/[shortCode]/route.ts (Edge Runtime)
+// Ce fichier n'est PAS du code mort.
+// Ne pas supprimer sans vérifier qu'aucune route Edge ne l'importe.
+
 import { PrismaClient } from "@prisma/client"
 import { withAccelerate } from "@prisma/extension-accelerate"
 
