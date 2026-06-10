@@ -1,7 +1,9 @@
+import crypto from "crypto"
 import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
+import { z } from "zod"
 import { prisma } from "@/server/db"
 import { authService } from "@/server/services/auth.service"
 import { sleep } from "@/lib/utils"
@@ -16,12 +18,12 @@ export const authConfig: NextAuthConfig = {
         password: { label: "Mot de passe", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
+        const parsed = z.object({ email: z.string(), password: z.string() }).safeParse(credentials)
+        if (!parsed.success) {
           return null
         }
 
-        const email = credentials.email as string
-        const password = credentials.password as string
+        const { email, password } = parsed.data
 
         // Vérification lockout AVANT la recherche utilisateur
         // checkLockout lance TRPCError TOO_MANY_REQUESTS si verrouillé
@@ -91,23 +93,43 @@ export const authConfig: NextAuthConfig = {
     async jwt({ token, user }) {
       // On initial signIn, set token from authorize return
       if (user) {
-        token.id = user.id as string
-        if ((user as { needsTotp?: boolean }).needsTotp) {
+        const parsedUser = z.object({
+          id: z.string(),
+          email: z.string(),
+          name: z.string().nullable().optional(),
+          image: z.string().nullable().optional(),
+          plan: z.string().optional(),
+          needsTotp: z.boolean().optional(),
+          partialToken: z.string().optional(),
+        }).safeParse(user)
+
+        if (!parsedUser.success) return token
+
+        const u = parsedUser.data
+        token.id = u.id
+        token.csrfToken = crypto.randomUUID()
+        if (u.needsTotp) {
           token.needsTotp = true
-          token.partialToken = (user as { partialToken?: string }).partialToken
+          token.partialToken = u.partialToken
           // Don't query DB — user hasn't completed TOTP challenge yet
           return token
         }
-        token.plan = (user as { plan?: string }).plan ?? "FREE"
+        token.plan = u.plan ?? "FREE"
         // Normal signIn — user object has all we need, skip DB sync
         return token
       }
 
       // On token refresh (user undefined), sync from DB
       if (token.id) {
+        const parsedToken = z.object({
+          id: z.string(),
+        }).safeParse({ id: token.id })
+
+        if (!parsedToken.success) return token
+
         try {
           const dbUser = await prisma.user.findUnique({
-            where: { id: token.id as string },
+            where: { id: parsedToken.data.id },
             select: { plan: true, email: true, totpEnabled: true, totpVerifiedAt: true },
           })
 
@@ -133,12 +155,25 @@ export const authConfig: NextAuthConfig = {
       return token
     },
     async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id as string
-        session.user.plan = (token.plan as string) ?? "FREE"
-        session.user.totpEnabled = (token.totpEnabled as boolean) ?? false
-        session.user.needsTotp = (token.needsTotp as boolean) ?? false
-        session.user.partialToken = token.partialToken as string | undefined
+      const parsedToken = z.object({
+        id: z.string(),
+        plan: z.string().optional().default("FREE"),
+        totpEnabled: z.boolean().optional().default(false),
+        needsTotp: z.boolean().optional().default(false),
+        partialToken: z.string().optional(),
+        csrfToken: z.string().optional(),
+      }).safeParse(token)
+
+      if (session.user && parsedToken.success) {
+        const t = parsedToken.data
+        session.user.id = t.id
+        session.user.plan = t.plan
+        session.user.totpEnabled = t.totpEnabled
+        session.user.needsTotp = t.needsTotp
+        session.user.partialToken = t.partialToken
+      }
+      if (parsedToken.success) {
+        session.csrfToken = parsedToken.data.csrfToken
       }
       return session
     },

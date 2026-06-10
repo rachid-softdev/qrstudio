@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { TRPCContext } from "@/server/trpc"
 
+const CSRF_TOKEN = "test-csrf-token"
+
 const prismaMock = vi.hoisted(() => {
   const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "deleteMany", "count"]) => {
     const m: Record<string, ReturnType<typeof vi.fn>> = {}
@@ -18,7 +20,11 @@ const prismaMock = vi.hoisted(() => {
     user: model(),
     scanDaily: model(["findUnique", "findFirst", "findMany", "create", "update", "delete", "deleteMany", "count", "groupBy"]),
     $queryRaw: vi.fn(),
-    $transaction: vi.fn(),
+    $transaction: vi.fn((cb: (tx: Record<string, unknown>) => unknown) => cb({
+      qRCode: model(),
+      landingPage: model(["findUnique", "findFirst", "create", "update"]),
+      $executeRawUnsafe: vi.fn(),
+    })),
   }
 })
 
@@ -47,7 +53,8 @@ function ctx(overrides?: Partial<TRPCContext>): TRPCContext {
 function authed(userId = "user-1", wsId = "ws-1"): TRPCContext {
   return ctx({
     user: { id: userId, email: "u@t.com", name: "U", image: null, plan: "FREE" },
-    reqHeaders: { "x-csrf-token": "1" },
+    session: { csrfToken: CSRF_TOKEN },
+    reqHeaders: { "x-csrf-token": CSRF_TOKEN },
   })
 }
 

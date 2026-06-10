@@ -1,6 +1,8 @@
 import * as Sentry from "@sentry/nextjs"
 import { Resend } from "resend"
 import logger from "@/lib/logger"
+import { withRetry } from "@/lib/retry"
+import { withBreaker, resendBreaker } from "@/lib/circuit-breaker"
 
 /**
  * Escape HTML special characters to prevent XSS in email templates.
@@ -61,23 +63,28 @@ export const emailService = {
     if (!client) return
 
     try {
-      await client.emails.send({
-        from: FROM_ADDRESS,
-        to: email,
-        subject: "Bienvenue sur QR Studio 🎉",
-        html: wrapHtml(`
-          <h1>Bienvenue ${escapeHtml(name)} !</h1>
-          <p>Votre compte QR Studio a été créé avec succès. Vous pouvez dès maintenant créer vos premiers QR codes dynamiques.</p>
-          <p>Commencez par créer votre premier QR code — c'est rapide et intuitif.</p>
-          <p style="text-align:center;margin-top:24px;">
-            <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/login" style="display:inline-block;background:#6366f1;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
-              Se connecter
-            </a>
-          </p>
-        `),
-      })
+      await withBreaker(resendBreaker, () =>
+        withRetry(() =>
+          client.emails.send({
+            from: FROM_ADDRESS,
+            to: email,
+            subject: "Bienvenue sur QR Studio 🎉",
+            html: wrapHtml(`
+              <h1>Bienvenue ${escapeHtml(name)} !</h1>
+              <p>Votre compte QR Studio a été créé avec succès. Vous pouvez dès maintenant créer vos premiers QR codes dynamiques.</p>
+              <p>Commencez par créer votre premier QR code — c'est rapide et intuitif.</p>
+              <p style="text-align:center;margin-top:24px;">
+                <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/login" style="display:inline-block;background:#6366f1;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
+                  Se connecter
+                </a>
+              </p>
+            `),
+          }),
+          { maxRetries: 3, baseDelay: 500 },
+        ),
+      )
     } catch (error) {
-      logger.error("Erreur envoi email bienvenue", error)
+      logger.error(error, "Erreur envoi email bienvenue")
       Sentry.captureException(error)
     }
   },
@@ -89,23 +96,28 @@ export const emailService = {
     const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/invite/${inviteToken}`
 
     try {
-      await client.emails.send({
-        from: FROM_ADDRESS,
-        to: email,
-        subject: `${escapeHtml(invitedByName)} vous invite à rejoindre ${escapeHtml(workspaceName)}`,
-        html: wrapHtml(`
-          <h1>Invitation à rejoindre ${escapeHtml(workspaceName)}</h1>
-          <p>${escapeHtml(invitedByName)} vous invite à collaborer sur l'espace de travail <strong>${escapeHtml(workspaceName)}</strong>.</p>
-          <p style="text-align:center;margin-top:24px;">
-            <a href="${inviteUrl}" style="display:inline-block;background:#6366f1;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
-              Accepter l'invitation
-            </a>
-          </p>
-          <p style="font-size:12px;color:#9ca3af;">Ce lien expire dans 7 jours.</p>
-        `),
-      })
+      await withBreaker(resendBreaker, () =>
+        withRetry(() =>
+          client.emails.send({
+            from: FROM_ADDRESS,
+            to: email,
+            subject: `${escapeHtml(invitedByName)} vous invite à rejoindre ${escapeHtml(workspaceName)}`,
+            html: wrapHtml(`
+              <h1>Invitation à rejoindre ${escapeHtml(workspaceName)}</h1>
+              <p>${escapeHtml(invitedByName)} vous invite à collaborer sur l'espace de travail <strong>${escapeHtml(workspaceName)}</strong>.</p>
+              <p style="text-align:center;margin-top:24px;">
+                <a href="${inviteUrl}" style="display:inline-block;background:#6366f1;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
+                  Accepter l'invitation
+                </a>
+              </p>
+              <p style="font-size:12px;color:#9ca3af;">Ce lien expire dans 7 jours.</p>
+            `),
+          }),
+          { maxRetries: 3, baseDelay: 500 },
+        ),
+      )
     } catch (error) {
-      logger.error("Erreur envoi email invitation", error)
+      logger.error(error, "Erreur envoi email invitation")
       Sentry.captureException(error)
     }
   },
@@ -115,18 +127,23 @@ export const emailService = {
     if (!client) return
 
     try {
-      await client.emails.send({
-        from: FROM_ADDRESS,
-        to: email,
-        subject: "Votre compte QR Studio a été supprimé",
-        html: wrapHtml(`
-          <h1>Compte supprimé</h1>
-          <p>Votre compte QR Studio et toutes les données associées ont été définitivement supprimés.</p>
-          <p>Si vous n'êtes pas à l'origine de cette action, contactez immédiatement notre support.</p>
-        `),
-      })
+      await withBreaker(resendBreaker, () =>
+        withRetry(() =>
+          client.emails.send({
+            from: FROM_ADDRESS,
+            to: email,
+            subject: "Votre compte QR Studio a été supprimé",
+            html: wrapHtml(`
+              <h1>Compte supprimé</h1>
+              <p>Votre compte QR Studio et toutes les données associées ont été définitivement supprimés.</p>
+              <p>Si vous n'êtes pas à l'origine de cette action, contactez immédiatement notre support.</p>
+            `),
+          }),
+          { maxRetries: 3, baseDelay: 500 },
+        ),
+      )
     } catch (error) {
-      logger.error("Erreur envoi email suppression compte", error)
+      logger.error(error, "Erreur envoi email suppression compte")
       Sentry.captureException(error)
     }
   },
@@ -136,19 +153,57 @@ export const emailService = {
     if (!client) return
 
     try {
-      await client.emails.send({
-        from: FROM_ADDRESS,
-        to: email,
-        subject: "Votre mot de passe QR Studio a été modifié",
-        html: wrapHtml(`
-          <h1>Mot de passe modifié</h1>
-          <p>Le mot de passe de votre compte QR Studio vient d'être changé avec succès.</p>
-          <p>Si vous n'avez pas effectué cette modification, veuillez contacter le support immédiatement.</p>
-        `),
-      })
+      await withBreaker(resendBreaker, () =>
+        withRetry(() =>
+          client.emails.send({
+            from: FROM_ADDRESS,
+            to: email,
+            subject: "Votre mot de passe QR Studio a été modifié",
+            html: wrapHtml(`
+              <h1>Mot de passe modifié</h1>
+              <p>Le mot de passe de votre compte QR Studio vient d'être changé avec succès.</p>
+              <p>Si vous n'avez pas effectué cette modification, veuillez contacter le support immédiatement.</p>
+            `),
+          }),
+          { maxRetries: 3, baseDelay: 500 },
+        ),
+      )
     } catch (error) {
-      logger.error("Erreur envoi email changement mot de passe", error)
+      logger.error(error, "Erreur envoi email changement mot de passe")
       Sentry.captureException(error)
     }
   },
+}
+
+export async function sendDowngradeNotification(email: string, name?: string): Promise<void> {
+  const client = createResendClient()
+  if (!client) return
+
+  try {
+    await withBreaker(resendBreaker, () =>
+      withRetry(() =>
+        client.emails.send({
+          from: FROM_ADDRESS,
+          to: email,
+          subject: "Votre abonnement QR Studio est terminé",
+          html: wrapHtml(`
+            <h1>Retour au plan Gratuit</h1>
+            <p>${name ? `Bonjour ${escapeHtml(name)},` : "Bonjour,"}</p>
+            <p>Votre abonnement payant est arrivé à son terme. Vous êtes désormais sur le plan <strong>Gratuit</strong>.</p>
+            <p>Tous vos QR codes restent actifs et accessibles. Les fonctionnalités avancées (analytiques étendues, accès API, domaine personnalisé) ne sont plus disponibles.</p>
+            <p>Pour retrouver l'accès à ces fonctionnalités, vous pouvez souscrire à un nouvel abonnement à tout moment.</p>
+            <p style="text-align:center;margin-top:24px;">
+              <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/billing" style="display:inline-block;background:#6366f1;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
+                Voir les offres
+              </a>
+            </p>
+          `),
+        }),
+        { maxRetries: 3, baseDelay: 500 },
+      ),
+    )
+  } catch (error) {
+    logger.error(error, "Erreur envoi email rétrogradation")
+    Sentry.captureException(error)
+  }
 }

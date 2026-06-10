@@ -9,6 +9,7 @@ declare module "next-auth" {
       partialToken?: string
       totpEnabled?: boolean
     } & DefaultSession["user"]
+    csrfToken?: string
   }
 
   interface User {
@@ -28,5 +29,6 @@ declare module "next-auth/jwt" {
     totpVerified?: boolean
     needsTotp?: boolean
     partialToken?: string
+    csrfToken?: string
   }
 }

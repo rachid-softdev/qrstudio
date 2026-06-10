@@ -4,6 +4,7 @@ import { createEdgePrismaClient } from "@/server/db-edge"
 import { resolveDestination } from "@/server/services/redirect.service"
 import { getCountry } from "@/lib/geo"
 import { parseDevice, parseOs, parseBrowser } from "@/lib/user-agent"
+import { getClientIp, hashIp } from "@/lib/ip"
 
 export const runtime = "edge"
 
@@ -41,10 +42,7 @@ export async function GET(
       deletedAt: qrCode.deletedAt,
     })
 
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-      request.headers.get("x-real-ip") ??
-      "unknown"
+    const ip = getClientIp(request)
 
     const userAgent = request.headers.get("user-agent") ?? undefined
     const referer = request.headers.get("referer") ?? undefined
@@ -61,21 +59,13 @@ export async function GET(
   }
 }
 
-async function sha256Hex(input: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(input)
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
-}
-
 async function recordScanInBackground(
   qrCodeId: string,
   ip: string,
   userAgent?: string,
   referer?: string
 ): Promise<void> {
-  const ipHash = await sha256Hex(ip)
+  const ipHash = await hashIp(ip)
 
   let country: string | null = null
   try {

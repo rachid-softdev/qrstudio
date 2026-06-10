@@ -11,13 +11,12 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { api } from "@/lib/trpc/client"
 import { TRPCClientError } from "@trpc/client"
+import { passwordSchema as sharedPasswordSchema } from "@/lib/validations"
 
-const passwordSchema = z
+const formSchema = z
   .object({
     currentPassword: z.string().min(1, "Mot de passe actuel requis"),
-    newPassword: z
-      .string()
-      .min(8, "Minimum 8 caractères"),
+    newPassword: sharedPasswordSchema,
     confirmPassword: z.string().min(1, "Confirmation requise"),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
@@ -25,7 +24,7 @@ const passwordSchema = z
     path: ["confirmPassword"],
   })
 
-type PasswordFormData = z.infer<typeof passwordSchema>
+type PasswordFormData = z.infer<typeof formSchema>
 
 export function SecurityForm() {
   const [showCurrent, setShowCurrent] = useState(false)
@@ -55,7 +54,7 @@ export function SecurityForm() {
     reset,
     formState: { errors },
   } = useForm<PasswordFormData>({
-    resolver: zodResolver(passwordSchema),
+    resolver: zodResolver(formSchema),
   })
 
   function onSubmit(data: PasswordFormData) {

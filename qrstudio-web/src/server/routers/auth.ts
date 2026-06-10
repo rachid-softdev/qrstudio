@@ -1,6 +1,23 @@
 import { z } from "zod"
+import { TRPCError } from "@trpc/server"
 import { publicProcedure, protectedProcedure, router } from "@/server/trpc"
 import { authService } from "@/server/services/auth.service"
+import { checkRegisterRateLimit } from "@/lib/rate-limit"
+import { getClientIp } from "@/lib/ip"
+
+/**
+ * Extrait l'adresse IP du client à partir des en-têtes de la requête.
+ * Délègue à getClientIp() pour une extraction fiable (proxy-aware).
+ */
+function extractClientIp(reqHeaders?: Record<string, string>): string | undefined {
+  if (!reqHeaders) return undefined
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(reqHeaders)) {
+    headers.set(key, value)
+  }
+  const ip = getClientIp({ headers })
+  return ip === "unknown" ? undefined : ip
+}
 
 const registerSchema = z.object({
   name: z.string().min(2, "Le nom doit contenir au moins 2 caractères"),
@@ -37,7 +54,17 @@ const disableTotpSchema = z.object({
 })
 
 export const authRouter = router({
-  register: publicProcedure.input(registerSchema).mutation(async ({ input }) => {
+  register: publicProcedure.input(registerSchema).mutation(async ({ ctx, input }) => {
+    const clientIp = extractClientIp(ctx.reqHeaders)
+    if (clientIp) {
+      const { success } = await checkRegisterRateLimit(clientIp)
+      if (!success) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Trop de tentatives d'inscription. Réessayez dans une heure.",
+        })
+      }
+    }
     return authService.register(input)
   }),
 
@@ -71,14 +98,16 @@ export const authRouter = router({
 
   verifyTotpChallenge: publicProcedure
     .input(verifyChallengeSchema)
-    .mutation(async ({ input }) => {
-      return authService.verifyTotpChallenge(input.partialToken, input.token)
+    .mutation(async ({ ctx, input }) => {
+      const clientIp = extractClientIp(ctx.reqHeaders)
+      return authService.verifyTotpChallenge(input.partialToken, input.token, clientIp)
     }),
 
   verifyBackupCode: publicProcedure
     .input(verifyBackupCodeSchema)
-    .mutation(async ({ input }) => {
-      return authService.verifyBackupCode(input.partialToken, input.backupCode)
+    .mutation(async ({ ctx, input }) => {
+      const clientIp = extractClientIp(ctx.reqHeaders)
+      return authService.verifyBackupCode(input.partialToken, input.backupCode, clientIp)
     }),
 
   disableTotp: protectedProcedure

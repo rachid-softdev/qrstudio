@@ -1,3 +1,5 @@
+import logger from "@/lib/logger"
+
 export interface RetryOptions {
   maxRetries?: number
   baseDelay?: number
@@ -48,7 +50,7 @@ export async function withRetry<T>(
         ? await Promise.race([
             fn(),
             new Promise<T>((_, reject) =>
-              setTimeout(() => reject(new Error("Operation timed out")), timeoutMs)
+              setTimeout(() => reject(new Error("Opération expirée")), timeoutMs)
             ),
           ])
         : await fn()
@@ -60,19 +62,23 @@ export async function withRetry<T>(
 
       if (attempt >= maxRetries || !shouldRetryFn(err)) {
         throw new RetryError(
-          `Operation failed after ${attempt} attempt(s)`,
+          `Opération échouée après ${attempt} tentative(s)`,
           attempt,
           err
         )
       }
 
       const delay = calculateDelay(attempt, baseDelay, maxDelay)
+      logger.warn(
+        { attempt, maxRetries, delay, err: err.message },
+        "Nouvelle tentative après erreur",
+      )
       await sleep(delay)
     }
   }
 
   throw new RetryError(
-    `Operation failed after ${maxRetries} attempt(s)`,
+    `Opération échouée après ${maxRetries} tentative(s)`,
     maxRetries,
     lastError
   )

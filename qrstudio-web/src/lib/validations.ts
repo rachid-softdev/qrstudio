@@ -85,3 +85,9 @@ export const QRUpdateSchema = z.object({
 })
 
 export type QRUpdateInput = z.infer<typeof QRUpdateSchema>
+
+export const passwordSchema = z.string()
+  .min(8, "Le mot de passe doit contenir au moins 8 caractères")
+  .regex(/[A-Z]/, "Doit contenir une majuscule")
+  .regex(/[a-z]/, "Doit contenir une minuscule")
+  .regex(/[0-9]/, "Doit contenir un chiffre")

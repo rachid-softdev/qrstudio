@@ -3,42 +3,24 @@ import { prisma } from "@/server/db"
 import { PLAN_LIMITS } from "@/lib/constants"
 import { generateShortCode } from "@/lib/utils"
 import { generateQRSvg } from "@/lib/qr-generator"
+import { withRetry } from "@/lib/retry"
+import logger from "@/lib/logger"
+import { prepareQRData, toQRDataInput, prepareQRDataForUpdate, toMetadata } from "@/lib/qr-formatters"
 import type { Plan, QRStatus, QRType, Prisma } from "@prisma/client"
 import type { QRCreateInput, QRUpdateInput } from "@/lib/validations"
 
 type PlanKey = keyof typeof PLAN_LIMITS
 
-/**
- * Minimal input shape for QR data generation.
- * Accepts both raw creation input and data mapped from a Prisma entity.
- */
-export interface QRDataInput {
-  type: QRType | string
-  destinationUrl?: string | null
-  wifi?: { ssid?: string; password?: string; encryption?: string } | undefined
-  vcard?: { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string } | undefined
-  textContent?: string | null
-}
+// Re-export for backward compatibility
+export type { QRDataInput } from "@/lib/qr-formatters"
+export { prepareQRData } from "@/lib/qr-formatters"
 
 /**
- * Maps a QRDataInput-shaped object into a JSONB-compatible metadata object.
- * Only includes keys that are relevant to the QR type.
+ * Wraps Prisma read operations with retry for transient DB errors.
+ * Operations inside $transaction are excluded (they use Prisma's built-in retry).
  */
-function toMetadata(input: { destinationUrl?: string | null; wifi?: Record<string, unknown> | null; vcard?: Record<string, unknown> | null; textContent?: string | null }): Record<string, unknown> {
-  const metadata: Record<string, unknown> = {}
-  if (input.destinationUrl !== undefined && input.destinationUrl !== null) {
-    metadata.destinationUrl = input.destinationUrl
-  }
-  if (input.wifi !== undefined) {
-    metadata.wifi = input.wifi ?? null
-  }
-  if (input.vcard !== undefined) {
-    metadata.vcard = input.vcard ?? null
-  }
-  if (input.textContent !== undefined && input.textContent !== null) {
-    metadata.textContent = input.textContent
-  }
-  return metadata
+function withRetryRead<T>(fn: () => Promise<T>): Promise<T> {
+  return withRetry(fn, { maxRetries: 2, baseDelay: 200, timeout: 5000 })
 }
 
 export const qrService = {
@@ -59,7 +41,9 @@ export const qrService = {
     const limit = PLAN_LIMITS[planKey].maxQRCodes
     if (limit === Infinity) return
 
-    const count = await prisma.qRCode.count({ where: { workspaceId, deletedAt: null } })
+    const count = await withRetryRead(() =>
+      prisma.qRCode.count({ where: { workspaceId, deletedAt: null } }),
+    )
     if (count >= limit) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -71,40 +55,27 @@ export const qrService = {
   async generateUniqueShortCode(): Promise<string> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const code = generateShortCode()
-      const existing = await prisma.qRCode.findUnique({ where: { shortCode: code } })
+      const existing = await withRetryRead(() =>
+        prisma.qRCode.findUnique({ where: { shortCode: code } }),
+      )
       if (!existing) return code
     }
     throw new Error('Échec de génération d\'un short code unique après 3 tentatives')
   },
 
   async create(data: QRCreateInput): Promise<{ id: string; shortCode: string; svgContent: string }> {
-    const workspace = await prisma.workspace.findUnique({
-      where: { id: data.workspaceId },
-      select: { ownerId: true, owner: { select: { plan: true } } },
-    })
+    const workspace = await withRetryRead(() =>
+      prisma.workspace.findUnique({
+        where: { id: data.workspaceId },
+        select: { ownerId: true, owner: { select: { plan: true } } },
+      }),
+    )
 
     if (!workspace) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Espace de travail introuvable' })
     }
 
     const shortCode = await qrService.generateUniqueShortCode()
-
-    let landingPageId: string | undefined
-
-    if (data.type === 'LANDING_PAGE' && data.landingPage) {
-      const landingPage = await prisma.landingPage.create({
-        data: {
-          title: data.landingPage.title,
-          description: data.landingPage.description ?? null,
-          ctaLabel: data.landingPage.ctaLabel ?? null,
-          ctaUrl: data.landingPage.ctaUrl ?? null,
-          imageUrl: data.landingPage.imageUrl ?? null,
-          bgColor: data.landingPage.bgColor ?? '#FFFFFF',
-          textColor: data.landingPage.textColor ?? '#111827',
-        },
-      })
-      landingPageId = landingPage.id
-    }
 
     const qrData = prepareQRData(data, shortCode)
     const svgContent = await generateQRSvg(qrData, {
@@ -120,6 +91,7 @@ export const qrService = {
     // Évite la race condition entre le checkPlanLimit (count) et la création.
     // Sans ce lock, deux requêtes simultanées pourraient toutes deux passer
     // le checkPlanLimit et créer des QR codes au-delà de la limite.
+    // La LandingPage est créée dans la même transaction pour garantir l'atomicité.
     const qrCode = await prisma.$transaction(async (tx) => {
       // Acquérir un lock exclusif pour ce workspace
       // pg_advisory_xact_lock se libère automatiquement à la fin de la transaction
@@ -141,6 +113,23 @@ export const qrService = {
             message: `Limite de ${limit} QR codes atteinte pour votre plan. Passez au plan supérieur.`,
           })
         }
+      }
+
+      // Créer la LandingPage dans la transaction si nécessaire
+      let landingPageId: string | undefined
+      if (data.type === 'LANDING_PAGE' && data.landingPage) {
+        const landingPage = await tx.landingPage.create({
+          data: {
+            title: data.landingPage.title,
+            description: data.landingPage.description ?? null,
+            ctaLabel: data.landingPage.ctaLabel ?? null,
+            ctaUrl: data.landingPage.ctaUrl ?? null,
+            imageUrl: data.landingPage.imageUrl ?? null,
+            bgColor: data.landingPage.bgColor ?? '#FFFFFF',
+            textColor: data.landingPage.textColor ?? '#111827',
+          },
+        })
+        landingPageId = landingPage.id
       }
 
       return await tx.qRCode.create({
@@ -165,10 +154,12 @@ export const qrService = {
   },
 
   async update(id: string, workspaceId: string, data: QRUpdateInput): Promise<{ id: string; svgContent?: string }> {
-    const existing = await prisma.qRCode.findFirst({
-      where: { id, workspaceId, deletedAt: null },
-      include: { landingPage: true },
-    })
+    const existing = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId, deletedAt: null },
+        include: { landingPage: true },
+      }),
+    )
 
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
@@ -211,39 +202,41 @@ export const qrService = {
     if (data.frameType !== undefined) updateData.frameType = data.frameType
     if (data.frameLabel !== undefined) updateData.frameLabel = data.frameLabel
 
-    if (existing.type === 'LANDING_PAGE' && data.landingPage) {
-      if (existing.landingPage) {
-        await prisma.landingPage.update({
-          where: { id: existing.landingPage.id },
-          data: {
-            title: data.landingPage.title,
-            description: data.landingPage.description ?? null,
-            ctaLabel: data.landingPage.ctaLabel ?? null,
-            ctaUrl: data.landingPage.ctaUrl ?? null,
-            imageUrl: data.landingPage.imageUrl ?? null,
-            bgColor: data.landingPage.bgColor ?? '#FFFFFF',
-            textColor: data.landingPage.textColor ?? '#111827',
-          },
-        })
-      } else {
-        const lp = await prisma.landingPage.create({
-          data: {
-            title: data.landingPage.title,
-            description: data.landingPage.description ?? null,
-            ctaLabel: data.landingPage.ctaLabel ?? null,
-            ctaUrl: data.landingPage.ctaUrl ?? null,
-            imageUrl: data.landingPage.imageUrl ?? null,
-            bgColor: data.landingPage.bgColor ?? '#FFFFFF',
-            textColor: data.landingPage.textColor ?? '#111827',
-          },
-        })
-        updateData.landingPageId = lp.id
+    await prisma.$transaction(async (tx) => {
+      if (existing.type === 'LANDING_PAGE' && data.landingPage) {
+        if (existing.landingPage) {
+          await tx.landingPage.update({
+            where: { id: existing.landingPage.id },
+            data: {
+              title: data.landingPage.title,
+              description: data.landingPage.description ?? null,
+              ctaLabel: data.landingPage.ctaLabel ?? null,
+              ctaUrl: data.landingPage.ctaUrl ?? null,
+              imageUrl: data.landingPage.imageUrl ?? null,
+              bgColor: data.landingPage.bgColor ?? '#FFFFFF',
+              textColor: data.landingPage.textColor ?? '#111827',
+            },
+          })
+        } else {
+          const lp = await tx.landingPage.create({
+            data: {
+              title: data.landingPage.title,
+              description: data.landingPage.description ?? null,
+              ctaLabel: data.landingPage.ctaLabel ?? null,
+              ctaUrl: data.landingPage.ctaUrl ?? null,
+              imageUrl: data.landingPage.imageUrl ?? null,
+              bgColor: data.landingPage.bgColor ?? '#FFFFFF',
+              textColor: data.landingPage.textColor ?? '#111827',
+            },
+          })
+          updateData.landingPageId = lp.id
+        }
       }
-    }
 
-    await prisma.qRCode.update({
-      where: { id },
-      data: updateData,
+      await tx.qRCode.update({
+        where: { id },
+        data: updateData,
+      })
     })
 
     let svgContent: string | undefined
@@ -265,26 +258,32 @@ export const qrService = {
   async updateStatus(id: string, workspaceId: string, status: QRStatus, userId: string): Promise<void> {
     // SÉCURITÉ : filtrer les QR codes soft-deleted (deletedAt !== null)
     // pour éviter de modifier le statut d'un élément dans la corbeille
-    const existing = await prisma.qRCode.findFirst({
-      where: { id, workspaceId, deletedAt: null },
-    })
+    const existing = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId, deletedAt: null },
+      }),
+    )
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
     }
 
-    const member = await prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    })
+    const member = await withRetryRead(() =>
+      prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId, userId } },
+      }),
+    )
     if (!member || member.role === 'VIEWER') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Action non autorisée' })
     }
 
     // RÈGLE MÉTIER : FREE ne peut pas PAUSER
     if (status === 'PAUSED') {
-      const workspaceOwner = await prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { owner: { select: { plan: true } } },
-      })
+      const workspaceOwner = await withRetryRead(() =>
+        prisma.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { owner: { select: { plan: true } } },
+        }),
+      )
       if (workspaceOwner?.owner.plan === 'FREE') {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -300,9 +299,11 @@ export const qrService = {
   },
 
   async softDelete(id: string, workspaceId: string): Promise<void> {
-    const qrCode = await prisma.qRCode.findFirst({
-      where: { id, workspaceId },
-    })
+    const qrCode = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId },
+      }),
+    )
     if (!qrCode) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
     }
@@ -315,25 +316,31 @@ export const qrService = {
   },
 
   async restore(id: string, workspaceId: string): Promise<void> {
-    const qrCode = await prisma.qRCode.findFirst({
-      where: { id, workspaceId, deletedAt: { not: null } },
-    })
+    const qrCode = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId, deletedAt: { not: null } },
+      }),
+    )
     if (!qrCode) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable dans la corbeille' })
     }
 
     // Vérifier le quota avant restauration
-    const workspace = await prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { owner: { select: { plan: true } } },
-    })
+    const workspace = await withRetryRead(() =>
+      prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { owner: { select: { plan: true } } },
+      }),
+    )
     if (workspace) {
       const planKey = workspace.owner.plan as PlanKey
       const limit = PLAN_LIMITS[planKey].maxQRCodes
       if (limit !== Infinity) {
-        const count = await prisma.qRCode.count({
-          where: { workspaceId, deletedAt: null },
-        })
+        const count = await withRetryRead(() =>
+          prisma.qRCode.count({
+            where: { workspaceId, deletedAt: null },
+          }),
+        )
         if (count >= limit) {
           throw new TRPCError({
             code: 'FORBIDDEN',
@@ -358,6 +365,58 @@ export const qrService = {
     }
   },
 
+  /**
+   * Refresh WorkspaceQRStats for a given workspace.
+   * Called after QR code creates, updates, deletes, or plan changes.
+   */
+  async refreshWorkspaceStats(workspaceId: string): Promise<void> {
+    try {
+      const stats = await prisma.qRCode.aggregate({
+        where: { workspaceId, deletedAt: null },
+        _count: true,
+        _sum: { totalScans: true },
+      })
+
+      const byType = await prisma.qRCode.groupBy({
+        by: ["status", "type"],
+        where: { workspaceId, deletedAt: null },
+        _count: true,
+      })
+
+      const activeCount = byType.find(g => g.status === "ACTIVE")?._count ?? 0
+      const pausedCount = byType.find(g => g.status === "PAUSED")?._count ?? 0
+      const urlCount = byType.find(g => g.type === "URL")?._count ?? 0
+      const landingCount = byType.find(g => g.type === "LANDING_PAGE")?._count ?? 0
+      const otherCount = stats._count - urlCount - landingCount
+
+      await prisma.workspaceQRStats.upsert({
+        where: { workspaceId },
+        create: {
+          workspaceId,
+          totalQRCount: stats._count,
+          activeCount,
+          pausedCount,
+          urlCount,
+          landingCount,
+          otherCount,
+          totalScans: stats._sum.totalScans ?? 0,
+        },
+        update: {
+          totalQRCount: stats._count,
+          activeCount,
+          pausedCount,
+          urlCount,
+          landingCount,
+          otherCount,
+          totalScans: stats._sum.totalScans ?? 0,
+        },
+      })
+    } catch (error) {
+      logger.error(error, "Échec refresh WorkspaceQRStats")
+      throw error
+    }
+  },
+
   prepareQRDataFromEntity(
     entity: {
       type: string
@@ -369,107 +428,4 @@ export const qrService = {
   },
 }
 
-export function prepareQRData(input: QRDataInput, shortCode: string): string {
-  switch (input.type) {
-    case 'URL':
-      return input.destinationUrl ?? ''
-    case 'WHATSAPP': {
-      const phone = input.destinationUrl ?? ''
-      return `https://wa.me/${phone.replace(/[^0-9]/g, '')}`
-    }
-    case 'WIFI':
-      return formatWifiString(input.wifi?.ssid ?? '', input.wifi?.password, input.wifi?.encryption)
-    case 'VCARD':
-      return formatVCardString(input.vcard)
-    case 'PDF':
-      return input.destinationUrl ?? ''
-    case 'TEXT':
-      return input.textContent ?? ''
-    case 'LANDING_PAGE': {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-      return `${appUrl}/l/${shortCode}`
-    }
-    default:
-      return ''
-  }
-}
 
-/**
- * Converts a Prisma QRCode entity with a JSONB metadata column to QRDataInput.
- */
-function toQRDataInput(
-  entity: {
-    type: string
-    metadata: unknown
-  },
-): QRDataInput {
-  const metadata = (entity.metadata as Record<string, unknown>) ?? {}
-  return {
-    type: entity.type as QRType,
-    destinationUrl: (metadata.destinationUrl as string | undefined) ?? undefined,
-    wifi: metadata.wifi as { ssid?: string; password?: string; encryption?: string } | undefined,
-    vcard: metadata.vcard as { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string } | undefined,
-    textContent: (metadata.textContent as string | undefined) ?? undefined,
-  }
-}
-
-function prepareQRDataForUpdate(existing: { type: string; shortCode?: string; metadata?: unknown }, data: QRUpdateInput): string {
-  const type = existing.type as QRType
-  const meta = existing.metadata as Record<string, unknown> | null | undefined
-
-  switch (type) {
-    case 'URL': {
-      const dest = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
-      return dest
-    }
-    case 'WHATSAPP': {
-      const phone = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
-      return `https://wa.me/${phone.replace(/[^0-9]/g, '')}`
-    }
-    case 'WIFI': {
-      const wifiMeta = meta?.wifi as Record<string, string> | undefined
-      const ssid = data.wifi?.ssid ?? wifiMeta?.ssid ?? ''
-      const password = data.wifi?.password ?? wifiMeta?.password ?? undefined
-      const encryption = (data.wifi?.encryption ?? wifiMeta?.encryption ?? 'nopass') as 'WPA' | 'WEP' | 'nopass'
-      return formatWifiString(ssid, password, encryption)
-    }
-    case 'VCARD': {
-      if (data.vcard) return formatVCardString(data.vcard)
-      const vcardMeta = meta?.vcard as Record<string, string> | undefined
-      return vcardMeta ? formatVCardString(vcardMeta) : ''
-    }
-    case 'PDF': {
-      const dest = data.destinationUrl ?? (meta?.destinationUrl as string | undefined) ?? ''
-      return dest
-    }
-    case 'TEXT': {
-      const text = data.textContent ?? (meta?.textContent as string | undefined) ?? ''
-      return text
-    }
-    case 'LANDING_PAGE': {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-      return `${appUrl}/l/${existing.shortCode ?? 'unknown'}`
-    }
-  }
-}
-
-function formatWifiString(ssid: string, password?: string, encryption?: string): string {
-  const enc = encryption ?? 'nopass'
-  const pass = password ? `P:${password};` : ''
-  return `WIFI:T:${enc};S:${ssid};${pass};`
-}
-
-function formatVCardString(vcard?: { firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; website?: string }): string {
-  if (!vcard) return ''
-  const lines: string[] = ['BEGIN:VCARD', 'VERSION:3.0']
-  if (vcard.firstName || vcard.lastName) {
-    lines.push(`FN:${vcard.firstName ?? ''} ${vcard.lastName ?? ''}`.trim())
-    lines.push(`N:${vcard.lastName ?? ''};${vcard.firstName ?? ''};;;`)
-  }
-  if (vcard.email) lines.push(`EMAIL:${vcard.email}`)
-  if (vcard.phone) lines.push(`TEL:${vcard.phone}`)
-  if (vcard.company) lines.push(`ORG:${vcard.company}`)
-  if (vcard.website) lines.push(`URL:${vcard.website}`)
-  lines.push('END:VCARD')
-  return lines.join('\n')
-}

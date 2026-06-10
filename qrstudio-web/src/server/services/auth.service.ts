@@ -1,19 +1,21 @@
 import bcrypt from "bcryptjs"
 import { TRPCError } from "@trpc/server"
 import * as Sentry from "@sentry/nextjs"
-import Stripe from "stripe"
+import { sign, verify } from "jsonwebtoken"
+import type { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
 import { emailService } from "@/server/services/email.service"
 import { totpService } from "@/server/services/totp.service"
+import { getStripeClient } from "@/lib/stripe"
+import { checkTotpRateLimit } from "@/lib/rate-limit"
+import { passwordSchema } from "@/lib/validations"
+import { AUTH } from "@/lib/constants"
 
 interface PartialTokenPayload {
   userId: string
   type: string
   iat?: number
 }
-
-const MAX_LOGIN_ATTEMPTS = 5
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000 // 15 minutes
 
 export const authService = {
   async checkLockout(email: string): Promise<void> {
@@ -46,12 +48,12 @@ export const authService = {
     })
     if (!user) return
     const newAttempts = user.loginAttempts + 1
-    if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+    if (newAttempts >= AUTH.MAX_LOGIN_ATTEMPTS) {
       await prisma.user.update({
         where: { email },
         data: {
           loginAttempts: newAttempts,
-          lockoutUntil: new Date(Date.now() + LOCKOUT_DURATION_MS),
+          lockoutUntil: new Date(Date.now() + AUTH.LOCKOUT_DURATION_MS),
         },
       })
     } else {
@@ -70,6 +72,8 @@ export const authService = {
   },
 
   async register(data: { name: string; email: string; password: string }) {
+    passwordSchema.parse(data.password)
+
     const existingUser = await prisma.user.findUnique({
       where: { email: data.email },
       select: { id: true },
@@ -84,30 +88,34 @@ export const authService = {
 
     const passwordHash = await bcrypt.hash(data.password, 12)
 
-    const user = await prisma.user.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        passwordHash,
-      },
-    })
-
     const slug = `ws_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
-    const workspace = await prisma.workspace.create({
-      data: {
-        name: `Espace de ${data.name}`,
-        slug,
-        ownerId: user.id,
-      },
-    })
+    const { user, workspace } = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: data.name,
+          email: data.email,
+          passwordHash,
+        },
+      })
 
-    await prisma.workspaceMember.create({
-      data: {
-        workspaceId: workspace.id,
-        userId: user.id,
-        role: "OWNER",
-      },
+      const workspace = await tx.workspace.create({
+        data: {
+          name: `Espace de ${data.name}`,
+          slug,
+          ownerId: user.id,
+        },
+      })
+
+      await tx.workspaceMember.create({
+        data: {
+          workspaceId: workspace.id,
+          userId: user.id,
+          role: "OWNER",
+        },
+      })
+
+      return { user, workspace }
     })
 
     // L'envoi d'email ne doit pas bloquer l'inscription
@@ -142,6 +150,8 @@ export const authService = {
   },
 
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    passwordSchema.parse(newPassword)
+
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { passwordHash: true, email: true },
@@ -203,8 +213,7 @@ export const authService = {
     // Annuler l'abonnement Stripe si actif
     if (user.stripeSubscriptionId) {
       try {
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "")
-        await stripe.subscriptions.cancel(user.stripeSubscriptionId)
+        await getStripeClient().subscriptions.cancel(user.stripeSubscriptionId)
       } catch {
         Sentry.captureException(
           new Error("Échec annulation abonnement Stripe")
@@ -229,8 +238,8 @@ export const authService = {
     if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable" })
     if (user.totpEnabled) throw new TRPCError({ code: "FORBIDDEN", message: "TOTP déjà activé" })
 
-    const { secret, uri } = totpService.generateSecret()
-    await prisma.user.update({ where: { id: userId }, data: { totpSecret: secret } })
+    const { secret, encryptedSecret, uri } = totpService.generateSecret()
+    await prisma.user.update({ where: { id: userId }, data: { totpSecret: encryptedSecret } })
 
     return { secret, uri }
   },
@@ -252,7 +261,7 @@ export const authService = {
       where: { id: userId },
       data: {
         totpEnabled: true,
-        totpBackupCodes: backupCodes as any,
+        totpBackupCodes: backupCodes as unknown as Prisma.InputJsonValue,
         totpVerifiedAt: new Date(),
       },
     })
@@ -260,7 +269,18 @@ export const authService = {
     return { backupCodes: plain }
   },
 
-  async verifyTotpChallenge(partialToken: string, token: string) {
+  async verifyTotpChallenge(partialToken: string, token: string, clientIp?: string) {
+    // Rate limiting: 5 tentatives par minute par IP
+    if (clientIp) {
+      const { success } = await checkTotpRateLimit(clientIp)
+      if (!success) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Trop de tentatives. Réessayez dans une minute.",
+        })
+      }
+    }
+
     const { userId } = await verifyPartialToken(partialToken)
 
     const user = await prisma.user.findUnique({ where: { id: userId } })
@@ -280,7 +300,18 @@ export const authService = {
     return { verified: true }
   },
 
-  async verifyBackupCode(partialToken: string, backupCode: string) {
+  async verifyBackupCode(partialToken: string, backupCode: string, clientIp?: string) {
+    // Rate limiting: 5 tentatives par minute par IP
+    if (clientIp) {
+      const { success } = await checkTotpRateLimit(clientIp)
+      if (!success) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Trop de tentatives. Réessayez dans une minute.",
+        })
+      }
+    }
+
     const { userId } = await verifyPartialToken(partialToken)
 
     const user = await prisma.user.findUnique({ where: { id: userId } })
@@ -300,7 +331,7 @@ export const authService = {
     codes[index].used = true
     await prisma.user.update({
       where: { id: user.id },
-      data: { totpBackupCodes: codes as any, totpVerifiedAt: new Date() },
+      data: { totpBackupCodes: codes as unknown as Prisma.InputJsonValue, totpVerifiedAt: new Date() },
     })
 
     return { verified: true }
@@ -322,7 +353,6 @@ export const authService = {
       data: {
         totpSecret: null,
         totpEnabled: false,
-        totpBackupCodes: null,
         totpVerifiedAt: null,
       },
     })
@@ -331,24 +361,21 @@ export const authService = {
   },
 
   async createPartialAuthToken(userId: string): Promise<string> {
-    const { default: jwt } = await import("jsonwebtoken")
     const secret = process.env.NEXTAUTH_SECRET
     if (!secret) throw new Error("NEXTAUTH_SECRET not configured")
 
-    return jwt.sign({ userId, type: "partial_auth" }, secret, { expiresIn: "5m" })
+    return sign({ userId, type: "partial_auth" }, secret, { expiresIn: AUTH.PARTIAL_TOKEN_TTL })
   },
 }
 
 async function verifyPartialToken(partialToken: string): Promise<{ userId: string }> {
   try {
-    const { decode } = await import("jsonwebtoken")
-    const decoded = decode(partialToken) as PartialTokenPayload | null
-    if (!decoded || decoded.type !== "partial_auth") {
+    const secret = process.env.NEXTAUTH_SECRET
+    if (!secret) throw new Error("NEXTAUTH_SECRET not configured")
+
+    const decoded = verify(partialToken, secret) as PartialTokenPayload
+    if (decoded.type !== "partial_auth") {
       throw new Error("Token invalide")
-    }
-    const iat = decoded.iat ? decoded.iat * 1000 : 0
-    if (Date.now() - iat > 5 * 60 * 1000) {
-      throw new Error("Token expiré")
     }
     return { userId: decoded.userId }
   } catch (err) {

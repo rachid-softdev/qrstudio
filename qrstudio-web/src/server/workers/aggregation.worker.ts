@@ -1,6 +1,7 @@
 import { getQueue, QUEUE_NAMES } from "@/server/queue"
 import { aggregationService } from "@/server/services/aggregation.service"
 import * as Sentry from "@sentry/nextjs"
+import logger from "@/lib/logger"
 
 /**
  * AggregationWorker:
@@ -20,11 +21,11 @@ export async function startAggregationWorker(): Promise<void> {
     try {
       const processed = await aggregationService.aggregateNextBatch()
       if (processed > 0) {
-        console.log(`[AggregationWorker] Aggregated ${processed} scan rows`)
+        logger.info(`[AggregationWorker] Aggregated ${processed} scan rows`)
       }
     } catch (error) {
       Sentry.captureException(error)
-      console.error("[AggregationWorker] Failed:", error)
+      logger.error(error, "[AggregationWorker] Failed")
       throw error
     }
   })

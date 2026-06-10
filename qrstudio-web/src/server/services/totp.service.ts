@@ -1,21 +1,23 @@
 import { generateSecret, generateURI, verifySync } from "otplib"
 import { createHash, randomBytes } from "crypto"
-
-const TOTP_ISSUER = "QR Studio"
+import { AUTH } from "@/lib/constants"
+import { encrypt, decrypt } from "@/lib/encryption"
 
 export const totpService = {
-  generateSecret(): { secret: string; uri: string; qrCodeUrl: string } {
+  generateSecret(): { secret: string; encryptedSecret: string; uri: string; qrCodeUrl: string } {
     const secret = generateSecret()
+    const encryptedSecret = encrypt(secret)
     const uri = generateURI({
-      issuer: TOTP_ISSUER,
+      issuer: AUTH.TOTP_ISSUER,
       label: "QR Studio",
       secret,
     })
-    return { secret, uri, qrCodeUrl: uri }
+    return { secret, encryptedSecret, uri, qrCodeUrl: uri }
   },
 
-  verifyToken(token: string, secret: string): boolean {
+  verifyToken(token: string, encryptedSecret: string): boolean {
     try {
+      const secret = decrypt(encryptedSecret)
       const result = verifySync({ secret, token })
       return result.valid
     } catch {

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
-import { qrRateLimit, authRateLimit, trpcMutationLimit, trpcQueryLimit } from "@/lib/rate-limit"
+import { getClientIp } from "@/lib/ip"
+import {
+  checkQrRateLimit,
+  checkAuthRateLimit,
+  checkTrpcMutationLimit,
+  checkTrpcQueryLimit,
+} from "@/lib/rate-limit"
 
 const authRoutes = ["/login", "/register"]
 const publicPrefixes = [
@@ -23,8 +29,7 @@ function addRequestId(response: NextResponse, requestId: string): NextResponse {
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const requestId = crypto.randomUUID()
   const url = request.nextUrl.pathname
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
+  const ip = getClientIp(request)
 
   if (url.startsWith("/api/v1/")) {
     const newUrl = url.replace("/api/v1/", "/api/")
@@ -33,7 +38,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   if (url.startsWith("/api/qr/")) {
-    const { success, remaining } = await qrRateLimit.limit(ip)
+    const { success, remaining } = await checkQrRateLimit(ip)
     if (!success) {
       const resp = new NextResponse("Too Many Requests", {
         status: 429,
@@ -47,7 +52,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   if (["/login", "/register"].includes(url)) {
-    const { success } = await authRateLimit.limit(ip)
+    const { success } = await checkAuthRateLimit(ip)
     if (!success) {
       const resp = new NextResponse("Trop de tentatives. Réessayez dans une heure.", {
         status: 429,
@@ -59,8 +64,9 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // Rate limiting for tRPC API
   if (url.startsWith("/api/trpc/")) {
-    const limiter = request.method === "POST" ? trpcMutationLimit : trpcQueryLimit
-    const { success, remaining } = await limiter.limit(ip)
+    const limiterFn =
+      request.method === "POST" ? checkTrpcMutationLimit : checkTrpcQueryLimit
+    const { success, remaining } = await limiterFn(ip)
     if (!success) {
       const resp = new NextResponse(
         JSON.stringify({ error: "Too Many Requests" }),

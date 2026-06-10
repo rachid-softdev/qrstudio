@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { Skeleton } from "@/components/shared/loading-skeleton"
 import { Button } from "@/components/ui/button"
 import { QRListFilters } from "@/components/qr/qr-list-filters"
+import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { toast } from "sonner"
 import type { QRType, QRStatus } from "@/types"
 
@@ -22,6 +23,7 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
   const [typeFilter, setTypeFilter] = useState<QRType | "all">("all")
   const [statusFilter, setStatusFilter] = useState<QRStatus | "all">("all")
   const [trashFilter, setTrashFilter] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -105,11 +107,9 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
 
   const handlePermanentDelete = useCallback(
     (id: string) => {
-      if (window.confirm("Êtes-vous sûr de vouloir supprimer définitivement ce QR code ? Cette action est irréversible et supprimera également les pages de destination et les statistiques associées.")) {
-        permanentDeleteMutation.mutate({ id, workspaceId })
-      }
+      setPendingDeleteId(id)
     },
-    [permanentDeleteMutation, workspaceId],
+    [],
   )
 
   const handleToggleStatus = useCallback(
@@ -201,6 +201,23 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
           </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteId(null) }}
+        title="Supprimer définitivement ?"
+        description="Êtes-vous sûr de vouloir supprimer définitivement ce QR code ? Cette action est irréversible et supprimera également les pages de destination et les statistiques associées."
+        confirmLabel="Supprimer"
+        cancelLabel="Annuler"
+        variant="destructive"
+        onConfirm={() => {
+          if (pendingDeleteId) {
+            permanentDeleteMutation.mutate({ id: pendingDeleteId, workspaceId })
+            setPendingDeleteId(null)
+          }
+        }}
+        isPending={permanentDeleteMutation.isPending}
+      />
     </div>
   )
 }

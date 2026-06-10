@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server"
 import { workspaceProcedure, router, requireWorkspaceAccess } from "@/server/trpc"
 import { prisma } from "@/server/db"
 import { qrService } from "@/server/services/qr.service"
-import { analyticsService } from "@/server/services/analytics.service"
+import { analyticsService, analyticsExportService } from "@/server/services/analytics.service"
 import { QRCreateSchema, QRUpdateSchema } from "@/lib/validations"
 import { generateQRSvg, generateQrPngBuffer, generateQrPdfBuffer } from "@/lib/qr-generator"
 import type { QRStatus } from "@prisma/client"
@@ -65,32 +65,41 @@ export const qrRouter = router({
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .query(async ({ ctx, input }) => {
       await workspaceQuery(ctx, input.workspaceId)
+
+      // #5: DTO projection — select only exposed fields (no internal Prisma entity leak)
+      const select = {
+        id: true, shortCode: true, name: true, type: true,
+        status: true, metadata: true,
+        fgColor: true, bgColor: true, logoUrl: true,
+        moduleShape: true, frameType: true, frameLabel: true,
+        totalScans: true, uniqueScans: true, lastScannedAt: true,
+        createdAt: true, updatedAt: true, deletedAt: true,
+      } as const
+
       const qrCode = await prisma.qRCode.findFirst({
         where: { id: input.id, workspaceId: input.workspaceId },
-        include: { landingPage: true },
+        select,
       })
 
       if (!qrCode) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      return qrCode
+      // #6: conditional landingPage — only load if type is LANDING_PAGE
+      if (qrCode.type === 'LANDING_PAGE') {
+        const landingPage = await prisma.landingPage.findFirst({
+          where: { qrCode: { id: qrCode.id } },
+        })
+        return { ...qrCode, landingPage }
+      }
+
+      return { ...qrCode, landingPage: null }
     }),
 
   create: workspaceProcedure
     .input(QRCreateSchema)
     .mutation(async ({ ctx, input }) => {
       await workspaceQuery(ctx, input.workspaceId)
-      const workspace = await prisma.workspace.findUnique({
-        where: { id: input.workspaceId },
-        select: { ownerId: true, owner: { select: { plan: true } } },
-      })
-
-      if (!workspace) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Espace de travail introuvable' })
-      }
-
-      await qrService.checkPlanLimit(input.workspaceId, workspace.owner.plan)
       return qrService.create(input)
     }),
 
@@ -198,7 +207,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      return analyticsService.exportCSV(input.qrCodeId, input.period)
+      return analyticsExportService.exportCSV(input.qrCodeId, input.period)
     }),
 
   exportCsvPage: workspaceProcedure
@@ -218,7 +227,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      return analyticsService.exportCSVPage(input.qrCodeId, input.period, input.cursor)
+      return analyticsExportService.exportCSVPage(input.qrCodeId, input.period, input.cursor)
     }),
 
   exportSvg: workspaceProcedure

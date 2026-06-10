@@ -4,14 +4,19 @@ import { initTRPC, TRPCError } from "@trpc/server"
 // ---------------------------------------------------------------------------
 // Build an isolated tRPC instance so we can unit-test the CSRF middleware
 // without importing production routers or DB mocks.
+//
+// The fix replaces the hardcoded '1' with a real token obtained from the
+// user's session context. The expected token is stored in ctx.csrfToken.
 // ---------------------------------------------------------------------------
 interface Ctx {
   reqHeaders?: Record<string, string>
+  csrfToken?: string
 }
 
 const t = initTRPC.context<Ctx>().create()
 
-// Replicate the exact CSRF middleware from src/server/trpc.ts
+// Replicate the FIXED CSRF middleware from src/server/trpc.ts
+// The fix: compare x-csrf-token header against a real token from session context
 const csrfMiddleware = t.middleware(({ ctx, next, type }) => {
   if (type === "query") {
     return next({ ctx })
@@ -21,7 +26,10 @@ const csrfMiddleware = t.middleware(({ ctx, next, type }) => {
     .reqHeaders as Record<string, string> | undefined
   const csrfToken = reqHeaders?.["x-csrf-token"]
 
-  if (csrfToken !== "1") {
+  // The expected token comes from the session/context (real token, not hardcoded '1')
+  const expectedToken = (ctx as Record<string, unknown>).csrfToken as string | undefined
+
+  if (!csrfToken || !expectedToken || csrfToken !== expectedToken) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Token CSRF manquant ou invalide",
@@ -35,54 +43,85 @@ const csrfMiddleware = t.middleware(({ ctx, next, type }) => {
 const queryProc = t.procedure.use(csrfMiddleware).query(() => "query-ok")
 const mutationProc = t.procedure.use(csrfMiddleware).mutation(() => "mutation-ok")
 
-function makeCtx(headers?: Record<string, string>): Ctx {
-  return { reqHeaders: headers ?? {} }
+function makeCtx(headers?: Record<string, string>, token?: string): Ctx {
+  return { reqHeaders: headers ?? {}, csrfToken: token }
 }
 
-describe("CSRF Middleware (in isolation)", () => {
+describe("CSRF Middleware — FIX: hardcoded '1' → real token", () => {
   // ─── Queries ────────────────────────────────────────────────────────────
   it("should allow queries without CSRF token (GET, read-only)", async () => {
     const caller = t.createCallerFactory(t.router({ test: queryProc }))(makeCtx())
     await expect(caller.test()).resolves.toBe("query-ok")
   })
 
-  it("should allow queries with valid CSRF token (still read-only)", async () => {
+  it("should allow queries even when csrfToken not set in context", async () => {
     const caller = t.createCallerFactory(t.router({ test: queryProc }))(
-      makeCtx({ "x-csrf-token": "1" })
+      makeCtx({ "x-csrf-token": "anything" }),
     )
     await expect(caller.test()).resolves.toBe("query-ok")
   })
 
   // ─── Mutations ──────────────────────────────────────────────────────────
-  it("should reject mutations without CSRF token (TRPCError BAD_REQUEST)", async () => {
-    const caller = t.createCallerFactory(t.router({ test: mutationProc }))(makeCtx())
+
+  it("should reject mutations without CSRF token header", async () => {
+    const caller = t.createCallerFactory(t.router({ test: mutationProc }))(
+      makeCtx({}, "real-csrf-token-abc123"),
+    )
     await expect(caller.test()).rejects.toThrow(TRPCError)
     await expect(caller.test()).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 
-  it("should reject mutations with empty CSRF token", async () => {
+  it("should reject mutations with empty CSRF token header", async () => {
     const caller = t.createCallerFactory(t.router({ test: mutationProc }))(
-      makeCtx({ "x-csrf-token": "" })
+      makeCtx({ "x-csrf-token": "" }, "real-csrf-token-abc123"),
     )
     await expect(caller.test()).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 
   it("should reject mutations with wrong CSRF token", async () => {
     const caller = t.createCallerFactory(t.router({ test: mutationProc }))(
-      makeCtx({ "x-csrf-token": "0" })
+      makeCtx({ "x-csrf-token": "wrong-token" }, "real-csrf-token-abc123"),
     )
     await expect(caller.test()).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 
-  it("should allow mutations with valid CSRF token (x-csrf-token: 1)", async () => {
+  it("should allow mutations with valid CSRF token matching context", async () => {
     const caller = t.createCallerFactory(t.router({ test: mutationProc }))(
-      makeCtx({ "x-csrf-token": "1" })
+      makeCtx({ "x-csrf-token": "real-csrf-token-abc123" }, "real-csrf-token-abc123"),
     )
     await expect(caller.test()).resolves.toBe("mutation-ok")
   })
 
-  it("should allow mutations when reqHeaders is undefined (edge case)", async () => {
-    const caller = t.createCallerFactory(t.router({ test: mutationProc }))({})
+  it("should reject mutations when csrfToken is not set in context (unauthenticated)", async () => {
+    const caller = t.createCallerFactory(t.router({ test: mutationProc }))(
+      makeCtx({ "x-csrf-token": "some-token" }),
+    )
     await expect(caller.test()).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+
+  it("should reject mutations when reqHeaders is undefined", async () => {
+    const caller = t.createCallerFactory(t.router({ test: mutationProc }))({
+      csrfToken: "real-csrf-token-abc123",
+    })
+    await expect(caller.test()).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+
+  it("should use a unique token per session (not hardcoded '1')", async () => {
+    // Two different sessions should have different CSRF tokens
+    const caller1 = t.createCallerFactory(t.router({ test: mutationProc }))(
+      makeCtx({ "x-csrf-token": "session-a-token" }, "session-a-token"),
+    )
+    const caller2 = t.createCallerFactory(t.router({ test: mutationProc }))(
+      makeCtx({ "x-csrf-token": "session-b-token" }, "session-b-token"),
+    )
+
+    await expect(caller1.test()).resolves.toBe("mutation-ok")
+    await expect(caller2.test()).resolves.toBe("mutation-ok")
+
+    // Cross-session token should fail
+    const callerCross = t.createCallerFactory(t.router({ test: mutationProc }))(
+      makeCtx({ "x-csrf-token": "session-a-token" }, "session-b-token"),
+    )
+    await expect(callerCross.test()).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 })

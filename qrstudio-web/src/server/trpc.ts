@@ -1,8 +1,20 @@
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
+import { z } from "zod"
 import { auth } from "@/server/auth"
 import { prisma } from "@/server/db"
+import logger from "@/lib/logger"
 import type { PrismaClient } from "@prisma/client"
+import type { Logger } from "pino"
+
+const sessionUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string().nullable().optional(),
+  image: z.string().nullable().optional(),
+  plan: z.string().optional().default("FREE"),
+  totpEnabled: z.boolean().optional().default(false),
+})
 
 export interface TRPCContext {
   db: PrismaClient
@@ -20,6 +32,8 @@ export interface TRPCContext {
     role: string
   }
   reqHeaders?: Record<string, string>
+  requestId?: string
+  logger?: Logger
 }
 
 export async function createTRPCContext(opts?: { headers: Headers }): Promise<TRPCContext> {
@@ -32,19 +46,31 @@ export async function createTRPCContext(opts?: { headers: Headers }): Promise<TR
     })
   }
 
+  // Extract X-Request-ID from request headers or generate one.
+  // Note: Next.js middleware sets X-Request-ID on the response, not the request,
+  // so this will typically generate a fresh UUID per tRPC call.
+  const requestId = headers["x-request-id"] ?? crypto.randomUUID()
+
+  let user: TRPCContext["user"] = undefined
+  if (session?.user) {
+    const parsed = sessionUserSchema.safeParse(session.user)
+    if (parsed.success) {
+      user = {
+        id: parsed.data.id,
+        email: parsed.data.email,
+        name: parsed.data.name ?? null,
+        image: parsed.data.image ?? null,
+        plan: parsed.data.plan,
+      }
+    }
+  }
+
   return {
     db: prisma,
     session,
-    user: session?.user
-      ? {
-          id: session.user.id as string,
-          email: session.user.email as string,
-          name: (session.user.name as string) ?? null,
-          image: (session.user.image as string) ?? null,
-          plan: (session.user.plan as string) ?? "FREE",
-        }
-      : undefined,
+    user,
     reqHeaders: headers,
+    requestId,
   }
 }
 
@@ -76,19 +102,70 @@ const csrfMiddleware = t.middleware(({ ctx, next, type }) => {
   }
 
   const reqHeaders = (ctx as Record<string, unknown>).reqHeaders as Record<string, string> | undefined
-  const csrfToken = reqHeaders?.['x-csrf-token']
+  const headerToken = reqHeaders?.['x-csrf-token']
+  const session = (ctx as Record<string, unknown>).session as { csrfToken?: string } | null | undefined
 
-  if (csrfToken !== '1') {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Token CSRF manquant ou invalide',
-    })
+  // Authenticated mutations: validate against session CSRF token
+  if (session?.csrfToken) {
+    if (!headerToken || headerToken !== session.csrfToken) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Token CSRF manquant ou invalide',
+      })
+    }
+    return next({ ctx })
   }
 
-  return next({ ctx })
+  // Unauthenticated mutations: validate via Origin header
+  const origin = reqHeaders?.['origin']
+  const host = reqHeaders?.['host']
+  if (origin) {
+    const allowedOrigin = process.env.NEXTAUTH_URL ?? process.env.VERCEL_URL ?? `http://localhost:${process.env.PORT ?? 3000}`
+    const originHost = new URL(origin).host
+    if (originHost !== (host ?? allowedOrigin.replace(/^https?:\/\//, ''))) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Requête cross-origin rejetée',
+      })
+    }
+    return next({ ctx })
+  }
+
+  // No session and no Origin → reject mutation
+  throw new TRPCError({
+    code: 'BAD_REQUEST',
+    message: 'Token CSRF manquant',
+  })
 })
 
-export const protectedProcedure = t.procedure.use(enforceUserIsAuthed).use(csrfMiddleware)
+/**
+ * Middleware that attaches a child logger with the request correlation ID.
+ * The child logger is available as `ctx.logger` in all downstream procedures.
+ */
+const logMiddleware = t.middleware(({ ctx, next }) => {
+  const requestId = ctx.requestId ?? crypto.randomUUID()
+  const childLogger = logger.child({ requestId })
+  return next({
+    ctx: {
+      ...ctx,
+      requestId,
+      logger: childLogger,
+    },
+  })
+})
+
+/**
+ * Procedure with a child logger scoped to the current request.
+ * Use this when you need correlation IDs in your logs.
+ */
+export const loggedProcedure = t.procedure.use(logMiddleware)
+
+/**
+ * Authenticated + CSRF-protected procedure.
+ * Includes the loggedProcedure middleware so all authenticated
+ * routes automatically get request-scoped logging.
+ */
+export const protectedProcedure = loggedProcedure.use(enforceUserIsAuthed).use(csrfMiddleware)
 
 export async function requireWorkspaceAccess(userId: string, workspaceId: string): Promise<{ id: string; role: string }> {
   const member = await prisma.workspaceMember.findUnique({

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { TRPCContext } from "@/server/trpc"
 
+const CSRF_TOKEN = "test-csrf-token"
+
 const prismaMock = vi.hoisted(() => {
   const model = (methods = ["findUnique", "findFirst", "findMany", "create", "update", "delete", "count"]) => {
     const m: Record<string, ReturnType<typeof vi.fn>> = {}
@@ -9,11 +11,13 @@ const prismaMock = vi.hoisted(() => {
     }
     return m
   }
-  return {
+  const m = {
     user: model(),
     workspace: model(),
     workspaceMember: model(),
+    $transaction: vi.fn((cb: (tx: typeof m) => unknown) => cb(m)),
   }
+  return m
 })
 
 vi.mock("@/server/auth", () => ({ auth: vi.fn() }))
@@ -36,10 +40,10 @@ import { authRouter } from "@/server/routers/auth"
 function ctx(overrides?: Partial<TRPCContext>): TRPCContext {
   return {
     db: prismaMock as never,
-    session: null,
+    session: { csrfToken: CSRF_TOKEN },
     user: undefined,
     workspace: undefined,
-    reqHeaders: { "x-csrf-token": "1" },
+    reqHeaders: { "x-csrf-token": CSRF_TOKEN },
     ...overrides,
   }
 }

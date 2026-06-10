@@ -1,9 +1,6 @@
 import { prisma } from "@/server/db"
 import { Prisma } from "@prisma/client"
-import { getCountry } from "@/lib/geo"
-import { parseDevice, parseOs, parseBrowser } from "@/lib/user-agent"
-import logger from "@/lib/logger"
-import { createHash } from "crypto"
+import { withRetry } from "@/lib/retry"
 import {
   readWithCache,
   invalidateAnalyticsCache,
@@ -13,27 +10,11 @@ import {
   DASHBOARD_TTL,
 } from "@/server/cache/analytics-cache"
 
-export interface ScanInput {
-  qrCodeId: string
-  ip?: string
-  userAgent?: string
-  referer?: string
-}
+export type Period = '7d' | '30d' | '90d' | 'all'
 
 export interface AnalyticsFilters {
   qrCodeId: string
-  period: '7d' | '30d' | '90d' | 'all'
-}
-
-export interface CSVPageResult {
-  rows: string[]
-  nextCursor?: string
-}
-
-export type Period = '7d' | '30d' | '90d' | 'all'
-
-function hashIp(ip: string): string {
-  return createHash('sha256').update(ip).digest('hex')
+  period: Period
 }
 
 function getPeriodDate(period: Period): Date | null {
@@ -83,75 +64,14 @@ function sortByOs(acc: Record<string, number>): { os: string; scans: number }[] 
     .map(([os, scans]) => ({ os, scans }))
 }
 
-function esc(value: string | null | undefined): string {
-  const str = value ?? ''
-  if (/[,"\n\r]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`
-  }
-  return str
+/**
+ * Wraps Prisma aggregation reads with retry for transient DB errors.
+ */
+function withRetryAgg<T>(fn: () => Promise<T>): Promise<T> {
+  return withRetry(fn, { maxRetries: 2, baseDelay: 200 })
 }
 
 export const analyticsService = {
-  // ── Write path (unchanged) ──────────────────────────────────────────────────
-
-  async recordScan(data: ScanInput): Promise<void> {
-    const ipHash = data.ip ? hashIp(data.ip) : null
-    let country: string | null = null
-
-    if (data.ip) {
-      try {
-        country = await getCountry(data.ip)
-      } catch (error) {
-        logger.error("Erreur géolocalisation IP", error)
-        country = null
-      }
-    }
-
-    const deviceType = data.userAgent ? parseDevice(data.userAgent) : null
-    const os = data.userAgent ? parseOs(data.userAgent) : null
-    const browser = data.userAgent ? parseBrowser(data.userAgent) : null
-
-    await prisma.$transaction(async (tx) => {
-      await tx.scan.create({
-        data: {
-          qrCodeId: data.qrCodeId,
-          ipHash,
-          country,
-          deviceType,
-          os,
-          browser,
-          referer: data.referer ?? null,
-        },
-      })
-
-      await tx.qRCode.update({
-        where: { id: data.qrCodeId },
-        data: {
-          totalScans: { increment: 1 },
-          lastScannedAt: new Date(),
-        },
-      })
-
-      if (ipHash) {
-        const recentScan = await tx.scan.findFirst({
-          where: {
-            qrCodeId: data.qrCodeId,
-            ipHash,
-            scannedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-          },
-          orderBy: { scannedAt: 'desc' },
-        })
-
-        if (!recentScan) {
-          await tx.qRCode.update({
-            where: { id: data.qrCodeId },
-            data: { uniqueScans: { increment: 1 } },
-          })
-        }
-      }
-    })
-  },
-
   // ── Read path: analytics via ScanDaily + cache ──────────────────────────────
 
   async getAnalytics(
@@ -174,10 +94,12 @@ export const analyticsService = {
     period: Period,
     retentionDays?: number,
   ) {
-    const qrCode = await prisma.qRCode.findUnique({
-      where: { id: qrCodeId },
-      select: { totalScans: true, uniqueScans: true },
-    })
+    const qrCode = await withRetryAgg(() =>
+      prisma.qRCode.findUnique({
+        where: { id: qrCodeId },
+        select: { totalScans: true, uniqueScans: true },
+      }),
+    )
 
     let effectiveSinceDate = getPeriodDate(period)
     if (retentionDays && retentionDays !== Infinity) {
@@ -191,20 +113,22 @@ export const analyticsService = {
     const todayStart = getTodayStart()
 
     // 1. Fetch ScanDaily rows (bounded by retention days, max 365)
-    const dailyRows = await prisma.scanDaily.findMany({
-      where: {
-        qrCodeId,
-        date: effectiveSinceDate ? { gte: effectiveSinceDate } : undefined,
-      },
-      orderBy: { date: 'asc' },
-      select: {
-        date: true,
-        totalScans: true,
-        byCountry: true,
-        byDevice: true,
-        byOs: true,
-      },
-    })
+    const dailyRows = await withRetryAgg(() =>
+      prisma.scanDaily.findMany({
+        where: {
+          qrCodeId,
+          date: effectiveSinceDate ? { gte: effectiveSinceDate } : undefined,
+        },
+        orderBy: { date: 'asc' },
+        select: {
+          date: true,
+          totalScans: true,
+          byCountry: true,
+          byDevice: true,
+          byOs: true,
+        },
+      }),
+    )
 
     const countryAcc: Record<string, number> = {}
     const deviceAcc: Record<string, number> = {}
@@ -291,25 +215,29 @@ export const analyticsService = {
     sevenDaysAgo.setHours(0, 0, 0, 0)
 
     // Get all QR code IDs in workspace
-    const qrCodeIds = await prisma.qRCode.findMany({
-      where: { workspaceId },
-      select: { id: true },
-    })
+    const qrCodeIds = await withRetryAgg(() =>
+      prisma.qRCode.findMany({
+        where: { workspaceId },
+        select: { id: true },
+      }),
+    )
     const ids = qrCodeIds.map((r) => r.id)
 
     let scansLast7Days: { date: string; scans: number }[] = []
 
     if (ids.length > 0) {
       // Use ScanDaily for aggregated data
-      const dailyTotals = await prisma.scanDaily.groupBy({
-        by: ['date'],
-        where: {
-          qrCodeId: { in: ids },
-          date: { gte: sevenDaysAgo },
-        },
-        _sum: { totalScans: true },
-        orderBy: { date: 'asc' },
-      })
+      const dailyTotals = await withRetryAgg(() =>
+        prisma.scanDaily.groupBy({
+          by: ['date'],
+          where: {
+            qrCodeId: { in: ids },
+            date: { gte: sevenDaysAgo },
+          },
+          _sum: { totalScans: true },
+          orderBy: { date: 'asc' },
+        }),
+      )
 
       // Also get today's partial from raw Scan (if today not yet in ScanDaily)
       const hasTodayInSummary = dailyTotals.some(
@@ -322,7 +250,7 @@ export const analyticsService = {
           SELECT COUNT(*)::int as count
           FROM "Scan"
           WHERE "qrCodeId" = ANY(${ids}::text[])
-            AND scanned_at >= ${todayStart}
+            AND "scannedAt" >= ${todayStart}
         `
         todayRawCount = Number(todayRows[0]?.count ?? 0)
       }
@@ -359,46 +287,48 @@ export const analyticsService = {
     }
 
     const [totalQRCodes, recentQRCodes, scansToday, topQRCodes, totalMembers] =
-      await Promise.all([
-        prisma.qRCode.count({ where: { workspaceId } }),
-        prisma.qRCode.findMany({
-          where: { workspaceId },
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-          select: {
-            id: true,
-            name: true,
-            shortCode: true,
-            type: true,
-            status: true,
-            totalScans: true,
-            lastScannedAt: true,
-            createdAt: true,
-          },
-        }),
-        prisma.scan.count({
-          where: {
-            qrCode: { workspaceId },
-            scannedAt: { gte: todayStart },
-          },
-        }),
-        prisma.qRCode.findMany({
-          where: { workspaceId },
-          orderBy: { totalScans: 'desc' },
-          take: 5,
-          select: {
-            id: true,
-            name: true,
-            shortCode: true,
-            type: true,
-            totalScans: true,
-            status: true,
-            lastScannedAt: true,
-            createdAt: true,
-          },
-        }),
-        prisma.workspaceMember.count({ where: { workspaceId } }),
-      ])
+      await withRetryAgg(() =>
+        Promise.all([
+          prisma.qRCode.count({ where: { workspaceId } }),
+          prisma.qRCode.findMany({
+            where: { workspaceId },
+            orderBy: { createdAt: 'desc' },
+            take: 5,
+            select: {
+              id: true,
+              name: true,
+              shortCode: true,
+              type: true,
+              status: true,
+              totalScans: true,
+              lastScannedAt: true,
+              createdAt: true,
+            },
+          }),
+          prisma.scan.count({
+            where: {
+              qrCode: { workspaceId },
+              scannedAt: { gte: todayStart },
+            },
+          }),
+          prisma.qRCode.findMany({
+            where: { workspaceId },
+            orderBy: { totalScans: 'desc' },
+            take: 5,
+            select: {
+              id: true,
+              name: true,
+              shortCode: true,
+              type: true,
+              totalScans: true,
+              status: true,
+              lastScannedAt: true,
+              createdAt: true,
+            },
+          }),
+          prisma.workspaceMember.count({ where: { workspaceId } }),
+        ]),
+      )
 
     return {
       totalScansToday: scansToday,
@@ -410,84 +340,16 @@ export const analyticsService = {
     }
   },
 
-  // ── CSV export (paginé via raw Scan, détail complet par scan) ────────────────
-
-  async exportCSV(
-    qrCodeId: string,
-    period: Period,
-  ): Promise<string> {
-    return this.legacyExportCSV(qrCodeId, period)
-  },
-
-  /**
-   * Paginated CSV export. Returns one page of 1000 rows with a cursor for the next page.
-   */
-  async exportCSVPage(
-    qrCodeId: string,
-    period: Period,
-    cursor?: string,
-  ): Promise<CSVPageResult> {
-    const sinceDate = getPeriodDate(period)
-
-    const where: Prisma.ScanFindManyArgs['where'] = { qrCodeId }
-    if (sinceDate) {
-      where.scannedAt = { gte: sinceDate }
-    }
-
-    const scans = await prisma.scan.findMany({
-      where,
-      orderBy: { scannedAt: 'desc' },
-      take: 1000,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    })
-
-    const header = 'Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent'
-    const rows = scans.map((s) => {
-      const date = s.scannedAt.toISOString()
-      return `${esc(date)},${esc(s.ipHash)},${esc(s.country)},${esc(s.city)},${esc(s.deviceType)},${esc(s.os)},${esc(s.browser)},${esc(s.referer)}`
-    })
-
-    return {
-      rows: cursor ? rows : [header, ...rows],
-      nextCursor:
-        scans.length === 1000 ? scans[scans.length - 1].id : undefined,
-    }
-  },
-
-  /**
-   * Legacy full CSV export (kept for backward compatibility).
-   */
-  async legacyExportCSV(
-    qrCodeId: string,
-    period: Period,
-  ): Promise<string> {
-    const sinceDate = getPeriodDate(period)
-    const where: Prisma.ScanFindManyArgs['where'] = { qrCodeId }
-    if (sinceDate) {
-      where.scannedAt = { gte: sinceDate }
-    }
-
-    const scans = await prisma.scan.findMany({
-      where,
-      orderBy: { scannedAt: 'desc' },
-      take: 10000,
-    })
-
-    const header = 'Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent'
-    const rows = scans.map((s) => {
-      const date = s.scannedAt.toISOString()
-      return `${esc(date)},${esc(s.ipHash)},${esc(s.country)},${esc(s.city)},${esc(s.deviceType)},${esc(s.os)},${esc(s.browser)},${esc(s.referer)}`
-    })
-
-    return [header, ...rows].join('\n')
-  },
-
   // ── Cache invalidation ──────────────────────────────────────────────────────
 
   async invalidateQrCache(qrCodeId: string): Promise<void> {
     await invalidateAnalyticsCache(qrCodeId)
   },
 }
+
+// Re-exports for backward compatibility
+export { scanRecorder } from "./scan-recorder.service"
+export { analyticsExportService } from "./analytics-export.service"
 
 // ── Private helpers (raw table queries, used for today's partial fallback) ────
 
@@ -496,18 +358,18 @@ async function getScansByDay(
   sinceDate: Date | null,
 ): Promise<{ date: string; scans: number }[]> {
   const whereClause = sinceDate
-    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate}`
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND "scannedAt" >= ${sinceDate}`
     : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId}`
 
   const results = await prisma.$queryRaw<
     Array<{ date: string; count: bigint }>
   >`
     SELECT
-      DATE(scanned_at) as date,
+      DATE("scannedAt") as date,
       COUNT(*)::int as count
     FROM "Scan"
     ${whereClause}
-    GROUP BY DATE(scanned_at)
+    GROUP BY DATE("scannedAt")
     ORDER BY date ASC
   `
 
@@ -522,7 +384,7 @@ async function getTopCountries(
   sinceDate: Date | null,
 ) {
   const whereClause = sinceDate
-    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate} AND country IS NOT NULL`
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND "scannedAt" >= ${sinceDate} AND country IS NOT NULL`
     : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND country IS NOT NULL`
 
   return prisma.$queryRaw<Array<{ country: string; count: bigint }>>`
@@ -540,7 +402,7 @@ async function getTopDevices(
   sinceDate: Date | null,
 ) {
   const whereClause = sinceDate
-    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate} AND "deviceType" IS NOT NULL`
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND "scannedAt" >= ${sinceDate} AND "deviceType" IS NOT NULL`
     : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND "deviceType" IS NOT NULL`
 
   return prisma.$queryRaw<Array<{ device: string; count: bigint }>>`
@@ -555,7 +417,7 @@ async function getTopDevices(
 
 async function getTopOs(qrCodeId: string, sinceDate: Date | null) {
   const whereClause = sinceDate
-    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND scanned_at >= ${sinceDate} AND os IS NOT NULL`
+    ? Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND "scannedAt" >= ${sinceDate} AND os IS NOT NULL`
     : Prisma.sql`WHERE "qrCodeId" = ${qrCodeId} AND os IS NOT NULL`
 
   return prisma.$queryRaw<Array<{ os: string; count: bigint }>>`

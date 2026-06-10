@@ -187,8 +187,7 @@ model QRCode {
   // associé reste actif avec landingPageId = null (soft orphan).
   landingPage LandingPage? @relation(fields: [landingPageId], references: [id], onDelete: SetNull)
 
-  @@index([workspaceId])
-  @@index([createdAt])
+  @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, type, status])
   @@index([workspaceId, deletedAt])
 }
@@ -228,10 +227,8 @@ model Scan {
 
   qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
 
-  @@index([qrCodeId])
-  @@index([qrCodeId, scannedAt])
+  @@index([qrCodeId, scannedAt, ipHash])
   @@index([scannedAt])
-  @@index([qrCodeId, ipHash])
 }
 
 // ─── Analytics — Summary ──────────────────────────────────────────────────────
@@ -283,6 +280,24 @@ model ApiKey {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// ─── Workspace QR Code Stats ────────────────────────────────────────────────
+// Materialized aggregate: one row per workspace, updated by backfill and
+// refreshed on plan/status changes.
+model WorkspaceQRStats {
+  id            String   @id @default(cuid())
+  workspaceId   String   @unique
+  totalQRCount  Int      @default(0)
+  activeCount   Int      @default(0)
+  pausedCount   Int      @default(0)
+  urlCount      Int      @default(0)
+  landingCount  Int      @default(0)
+  otherCount    Int      @default(0)
+  totalScans    Int      @default(0)
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // ─── Webhook Idempotency ─────────────────────────────────────────────────────

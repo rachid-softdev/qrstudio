@@ -10,7 +10,7 @@ const prismaMock = vi.hoisted(() => {
     for (const method of methods) { m[method] = vi.fn() }
     return m
   }
-  return {
+  const m = {
     user: model(),
     workspace: model(["findUnique", "findFirst", "findMany", "create", "update", "delete", "count"]),
     workspaceMember: model(),
@@ -19,7 +19,9 @@ const prismaMock = vi.hoisted(() => {
     apiKey: model(),
     landingPage: model(),
     scan: model(),
+    $transaction: vi.fn((cb: (t: Record<string, unknown>) => unknown) => cb(m)),
   }
+  return m
 })
 
 vi.mock("@/server/db", () => ({ prisma: prismaMock }))

@@ -1,6 +1,6 @@
 "use client"
 
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { MoreHorizontalIcon, QrCodeIcon } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -60,10 +60,27 @@ export function QRCard({
   onPermanentDelete,
   onToggleStatus,
 }: QRCardProps) {
+  const router = useRouter()
   const canEdit = role === "OWNER" || role === "EDITOR"
+
+  function handleCardClick() {
+    if (!trash) router.push(`/dashboard/qr/${id}`)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !trash) router.push(`/dashboard/qr/${id}`)
+  }
+
   return (
-    <Link href={trash ? "#" : `/dashboard/qr/${id}`}>
-      <Card size="sm" className={`group cursor-pointer transition-shadow hover:shadow-md ${trash ? "opacity-60" : ""}`}>
+    <Card
+      size="sm"
+      role="button"
+      tabIndex={trash ? -1 : 0}
+      aria-label={trash ? `QR code supprimé : ${name}` : `Voir le QR code : ${name}`}
+      className={`group cursor-pointer transition-shadow hover:shadow-md ${trash ? "opacity-60" : ""}`}
+      onClick={handleCardClick}
+      onKeyDown={handleKeyDown}
+    >
         <CardHeader>
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
@@ -97,6 +114,7 @@ export function QRCard({
                       <DropdownMenuItem
                         onClick={(e) => {
                           e.preventDefault()
+                          e.stopPropagation()
                           onRestore?.(id)
                         }}
                       >
@@ -106,6 +124,7 @@ export function QRCard({
                         variant="destructive"
                         onClick={(e) => {
                           e.preventDefault()
+                          e.stopPropagation()
                           onPermanentDelete?.(id)
                         }}
                       >
@@ -117,6 +136,7 @@ export function QRCard({
                       <DropdownMenuItem
                         onClick={(e) => {
                           e.preventDefault()
+                          e.stopPropagation()
                           onToggleStatus?.(id, status === "ACTIVE" ? "PAUSED" : "ACTIVE")
                         }}
                       >
@@ -127,6 +147,7 @@ export function QRCard({
                           variant="destructive"
                           onClick={(e) => {
                             e.preventDefault()
+                            e.stopPropagation()
                             onDelete?.(id)
                           }}
                         >
@@ -162,7 +183,6 @@ export function QRCard({
             <span>Créé le {formatDate(new Date(createdAt))}</span>
           </div>
         </CardFooter>
-      </Card>
-    </Link>
+    </Card>
   )
 }

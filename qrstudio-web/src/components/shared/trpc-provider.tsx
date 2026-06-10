@@ -2,7 +2,8 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { httpBatchLink } from "@trpc/client"
-import { useState } from "react"
+import { useRef, useState } from "react"
+import { SessionProvider, useSession } from "next-auth/react"
 import superjson from "superjson"
 import { api } from "@/lib/trpc/client"
 
@@ -12,7 +13,11 @@ function getBaseUrl() {
   return `http://localhost:${process.env.PORT ?? 3000}`
 }
 
-export function TRPCProvider({ children }: { children: React.ReactNode }) {
+function TRPCProviderInner({ children }: { children: React.ReactNode }) {
+  const { data: session } = useSession()
+  const csrfTokenRef = useRef("")
+  csrfTokenRef.current = (session as { csrfToken?: string } | undefined)?.csrfToken ?? ""
+
   const [queryClient] = useState(() => new QueryClient())
   const [trpcClient] = useState(() =>
     api.createClient({
@@ -22,7 +27,7 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
           transformer: superjson,
           headers() {
             return {
-              'x-csrf-token': '1',
+              "x-csrf-token": csrfTokenRef.current,
             }
           },
         }),
@@ -36,5 +41,13 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
         {children}
       </QueryClientProvider>
     </api.Provider>
+  )
+}
+
+export function TRPCProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <SessionProvider>
+      <TRPCProviderInner>{children}</TRPCProviderInner>
+    </SessionProvider>
   )
 }

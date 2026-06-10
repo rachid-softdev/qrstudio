@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react"
 import { toast } from "sonner"
 import type { QRType } from "@/types/index"
+import type { QRCreateInput } from "@/lib/validations"
 import type { ModuleShape } from "@/lib/qr-generator"
 import { computeQRData } from "@/lib/qr-utils"
 import { Separator } from "@/components/ui/separator"
@@ -25,7 +26,7 @@ interface QRCreatorProps {
 export function QRCreator({ workspaceId }: QRCreatorProps) {
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState<QRType | null>(null)
-  const [content, setContent] = useState<Record<string, unknown>>({})
+  const [content, setContent] = useState<Partial<QRCreateInput>>({})
   const [qrName, setQrName] = useState("")
   const [design, setDesign] = useState({
     fgColor: "#000000",
@@ -49,7 +50,7 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
 
     setLoading(true)
     try {
-      const payload: Record<string, unknown> = {
+      const payload: QRCreateInput = {
         workspaceId,
         name: qrName.trim(),
         type: selectedType,
@@ -57,16 +58,12 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
         fgColor: design.fgColor,
         bgColor: design.bgColor,
         moduleShape: design.moduleShape,
-        frameType: design.frameType,
+        frameType: (design.frameType as QRCreateInput["frameType"]) ?? undefined,
         frameLabel: design.frameLabel || undefined,
-        logoUrl: design.logoUrl,
+        logoUrl: design.logoUrl ?? undefined,
       }
 
-      if (!payload.destinationUrl && !(content.wifi || content.vcard || content.textContent || content.landingPage)) {
-        delete payload.destinationUrl
-      }
-
-      const result = await createMutation.mutateAsync(payload as Parameters<typeof createMutation.mutateAsync>[0])
+      const result = await createMutation.mutateAsync(payload)
       setCreatedQrId(result.id)
       setCreatedShortCode(result.shortCode)
       toast.success("QR code créé avec succès !")
