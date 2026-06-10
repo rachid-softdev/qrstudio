@@ -6,7 +6,7 @@ import type { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
 import { emailService } from "@/server/services/email.service"
 import { totpService } from "@/server/services/totp.service"
-import { totpRateLimit } from "@/lib/rate-limit"
+import { checkTotpRateLimit } from "@/lib/rate-limit"
 
 interface PartialTokenPayload {
   userId: string
@@ -269,7 +269,7 @@ export const authService = {
   async verifyTotpChallenge(partialToken: string, token: string, clientIp?: string) {
     // Rate limiting: 5 tentatives par minute par IP
     if (clientIp) {
-      const { success } = await totpRateLimit.limit(clientIp)
+      const { success } = await checkTotpRateLimit(clientIp)
       if (!success) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
@@ -300,7 +300,7 @@ export const authService = {
   async verifyBackupCode(partialToken: string, backupCode: string, clientIp?: string) {
     // Rate limiting: 5 tentatives par minute par IP
     if (clientIp) {
-      const { success } = await totpRateLimit.limit(clientIp)
+      const { success } = await checkTotpRateLimit(clientIp)
       if (!success) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",

@@ -2,6 +2,7 @@ import { prisma } from "@/server/db"
 import { Prisma } from "@prisma/client"
 import { getCountry } from "@/lib/geo"
 import { parseDevice, parseOs, parseBrowser } from "@/lib/user-agent"
+import { withRetry } from "@/lib/retry"
 import logger from "@/lib/logger"
 import { createHash } from "crypto"
 import {
@@ -91,6 +92,13 @@ function esc(value: string | null | undefined): string {
   return str
 }
 
+/**
+ * Wraps Prisma aggregation reads with retry for transient DB errors.
+ */
+function withRetryAgg<T>(fn: () => Promise<T>): Promise<T> {
+  return withRetry(fn, { maxRetries: 2, baseDelay: 200 })
+}
+
 export const analyticsService = {
   // ── Write path (unchanged) ──────────────────────────────────────────────────
 
@@ -174,10 +182,12 @@ export const analyticsService = {
     period: Period,
     retentionDays?: number,
   ) {
-    const qrCode = await prisma.qRCode.findUnique({
-      where: { id: qrCodeId },
-      select: { totalScans: true, uniqueScans: true },
-    })
+    const qrCode = await withRetryAgg(() =>
+      prisma.qRCode.findUnique({
+        where: { id: qrCodeId },
+        select: { totalScans: true, uniqueScans: true },
+      }),
+    )
 
     let effectiveSinceDate = getPeriodDate(period)
     if (retentionDays && retentionDays !== Infinity) {
@@ -191,20 +201,22 @@ export const analyticsService = {
     const todayStart = getTodayStart()
 
     // 1. Fetch ScanDaily rows (bounded by retention days, max 365)
-    const dailyRows = await prisma.scanDaily.findMany({
-      where: {
-        qrCodeId,
-        date: effectiveSinceDate ? { gte: effectiveSinceDate } : undefined,
-      },
-      orderBy: { date: 'asc' },
-      select: {
-        date: true,
-        totalScans: true,
-        byCountry: true,
-        byDevice: true,
-        byOs: true,
-      },
-    })
+    const dailyRows = await withRetryAgg(() =>
+      prisma.scanDaily.findMany({
+        where: {
+          qrCodeId,
+          date: effectiveSinceDate ? { gte: effectiveSinceDate } : undefined,
+        },
+        orderBy: { date: 'asc' },
+        select: {
+          date: true,
+          totalScans: true,
+          byCountry: true,
+          byDevice: true,
+          byOs: true,
+        },
+      }),
+    )
 
     const countryAcc: Record<string, number> = {}
     const deviceAcc: Record<string, number> = {}
@@ -291,25 +303,29 @@ export const analyticsService = {
     sevenDaysAgo.setHours(0, 0, 0, 0)
 
     // Get all QR code IDs in workspace
-    const qrCodeIds = await prisma.qRCode.findMany({
-      where: { workspaceId },
-      select: { id: true },
-    })
+    const qrCodeIds = await withRetryAgg(() =>
+      prisma.qRCode.findMany({
+        where: { workspaceId },
+        select: { id: true },
+      }),
+    )
     const ids = qrCodeIds.map((r) => r.id)
 
     let scansLast7Days: { date: string; scans: number }[] = []
 
     if (ids.length > 0) {
       // Use ScanDaily for aggregated data
-      const dailyTotals = await prisma.scanDaily.groupBy({
-        by: ['date'],
-        where: {
-          qrCodeId: { in: ids },
-          date: { gte: sevenDaysAgo },
-        },
-        _sum: { totalScans: true },
-        orderBy: { date: 'asc' },
-      })
+      const dailyTotals = await withRetryAgg(() =>
+        prisma.scanDaily.groupBy({
+          by: ['date'],
+          where: {
+            qrCodeId: { in: ids },
+            date: { gte: sevenDaysAgo },
+          },
+          _sum: { totalScans: true },
+          orderBy: { date: 'asc' },
+        }),
+      )
 
       // Also get today's partial from raw Scan (if today not yet in ScanDaily)
       const hasTodayInSummary = dailyTotals.some(
@@ -359,46 +375,48 @@ export const analyticsService = {
     }
 
     const [totalQRCodes, recentQRCodes, scansToday, topQRCodes, totalMembers] =
-      await Promise.all([
-        prisma.qRCode.count({ where: { workspaceId } }),
-        prisma.qRCode.findMany({
-          where: { workspaceId },
-          orderBy: { createdAt: 'desc' },
-          take: 5,
-          select: {
-            id: true,
-            name: true,
-            shortCode: true,
-            type: true,
-            status: true,
-            totalScans: true,
-            lastScannedAt: true,
-            createdAt: true,
-          },
-        }),
-        prisma.scan.count({
-          where: {
-            qrCode: { workspaceId },
-            scannedAt: { gte: todayStart },
-          },
-        }),
-        prisma.qRCode.findMany({
-          where: { workspaceId },
-          orderBy: { totalScans: 'desc' },
-          take: 5,
-          select: {
-            id: true,
-            name: true,
-            shortCode: true,
-            type: true,
-            totalScans: true,
-            status: true,
-            lastScannedAt: true,
-            createdAt: true,
-          },
-        }),
-        prisma.workspaceMember.count({ where: { workspaceId } }),
-      ])
+      await withRetryAgg(() =>
+        Promise.all([
+          prisma.qRCode.count({ where: { workspaceId } }),
+          prisma.qRCode.findMany({
+            where: { workspaceId },
+            orderBy: { createdAt: 'desc' },
+            take: 5,
+            select: {
+              id: true,
+              name: true,
+              shortCode: true,
+              type: true,
+              status: true,
+              totalScans: true,
+              lastScannedAt: true,
+              createdAt: true,
+            },
+          }),
+          prisma.scan.count({
+            where: {
+              qrCode: { workspaceId },
+              scannedAt: { gte: todayStart },
+            },
+          }),
+          prisma.qRCode.findMany({
+            where: { workspaceId },
+            orderBy: { totalScans: 'desc' },
+            take: 5,
+            select: {
+              id: true,
+              name: true,
+              shortCode: true,
+              type: true,
+              totalScans: true,
+              status: true,
+              lastScannedAt: true,
+              createdAt: true,
+            },
+          }),
+          prisma.workspaceMember.count({ where: { workspaceId } }),
+        ]),
+      )
 
     return {
       totalScansToday: scansToday,

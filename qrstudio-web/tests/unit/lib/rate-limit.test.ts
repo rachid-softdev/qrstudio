@@ -33,16 +33,16 @@ vi.mock("next/server", () => {
 })
 
 import { middleware } from "@/middleware"
-import { trpcMutationLimit, trpcQueryLimit } from "@/lib/rate-limit"
+import { checkTrpcMutationLimit, checkTrpcQueryLimit } from "@/lib/rate-limit"
 
 describe("rate-limit — configuration (1b.4)", () => {
-  it("should export trpcMutationLimit with 60 requests per 60s window", () => {
-    // Verify the limiter is configured (mock is set up)
-    expect(trpcMutationLimit).toBeDefined()
+  it("should export checkTrpcMutationLimit for 60 requests per 60s window", () => {
+    // Verify the wrapper function is exported
+    expect(checkTrpcMutationLimit).toBeDefined()
   })
 
-  it("should export trpcQueryLimit with 300 requests per 60s window", () => {
-    expect(trpcQueryLimit).toBeDefined()
+  it("should export checkTrpcQueryLimit for 300 requests per 60s window", () => {
+    expect(checkTrpcQueryLimit).toBeDefined()
   })
 })
 

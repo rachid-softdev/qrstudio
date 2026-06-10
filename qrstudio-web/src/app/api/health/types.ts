@@ -2,6 +2,7 @@ export interface CheckResult {
   status: "ok" | "error" | "not_configured"
   error?: string
   queueSize?: number
+  dlqCount?: number
 }
 
 export interface HealthResponse {
@@ -12,5 +13,6 @@ export interface HealthResponse {
     database: CheckResult
     redis: CheckResult
     pgBoss: CheckResult
+    dlq: CheckResult
   }
 }

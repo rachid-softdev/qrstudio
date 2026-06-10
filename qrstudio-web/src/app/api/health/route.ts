@@ -54,16 +54,33 @@ async function checkPgBoss(): Promise<CheckResult> {
   }
 }
 
+async function checkDLQ(): Promise<CheckResult> {
+  if (!process.env.DATABASE_URL) {
+    return { status: "not_configured" }
+  }
+  try {
+    const { monitorDLQ } = await import("@/server/queue")
+    const dlqCount = await withRetry(() => monitorDLQ(), {
+      maxRetries: 1,
+      timeout: 5000,
+    })
+    return { status: "ok", dlqCount: dlqCount < 0 ? 0 : dlqCount }
+  } catch (error) {
+    return { status: "error", error: String(error) }
+  }
+}
+
 // ── GET handler ────────────────────────────────────────────────────────────────
 
 export async function GET() {
-  const [database, redis, pgBoss] = await Promise.all([
+  const [database, redis, pgBoss, dlq] = await Promise.all([
     checkDatabase(),
     checkRedis(),
     checkPgBoss(),
+    checkDLQ(),
   ])
 
-  const checks = { database, redis, pgBoss }
+  const checks = { database, redis, pgBoss, dlq }
   const allOk = Object.values(checks).every(
     (c) => c.status === "ok" || c.status === "not_configured",
   )

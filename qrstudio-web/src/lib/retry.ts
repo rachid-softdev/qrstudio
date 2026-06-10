@@ -1,3 +1,5 @@
+import logger from "@/lib/logger"
+
 export interface RetryOptions {
   maxRetries?: number
   baseDelay?: number
@@ -67,6 +69,10 @@ export async function withRetry<T>(
       }
 
       const delay = calculateDelay(attempt, baseDelay, maxDelay)
+      logger.warn(
+        { attempt, maxRetries, delay, err: err.message },
+        "Retrying operation after error",
+      )
       await sleep(delay)
     }
   }

@@ -3,6 +3,8 @@ import { prisma } from "@/server/db"
 import { PLAN_LIMITS } from "@/lib/constants"
 import { generateShortCode } from "@/lib/utils"
 import { generateQRSvg } from "@/lib/qr-generator"
+import { withRetry } from "@/lib/retry"
+import logger from "@/lib/logger"
 import type { Plan, QRStatus, QRType, Prisma } from "@prisma/client"
 import type { QRCreateInput, QRUpdateInput } from "@/lib/validations"
 
@@ -12,6 +14,14 @@ type PlanKey = keyof typeof PLAN_LIMITS
  * Minimal input shape for QR data generation.
  * Accepts both raw creation input and data mapped from a Prisma entity.
  */
+/**
+ * Wraps Prisma read operations with retry for transient DB errors.
+ * Operations inside $transaction are excluded (they use Prisma's built-in retry).
+ */
+function withRetryRead<T>(fn: () => Promise<T>): Promise<T> {
+  return withRetry(fn, { maxRetries: 2, baseDelay: 200, timeout: 5000 })
+}
+
 export interface QRDataInput {
   type: QRType | string
   destinationUrl?: string | null
@@ -59,7 +69,9 @@ export const qrService = {
     const limit = PLAN_LIMITS[planKey].maxQRCodes
     if (limit === Infinity) return
 
-    const count = await prisma.qRCode.count({ where: { workspaceId, deletedAt: null } })
+    const count = await withRetryRead(() =>
+      prisma.qRCode.count({ where: { workspaceId, deletedAt: null } }),
+    )
     if (count >= limit) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -71,17 +83,21 @@ export const qrService = {
   async generateUniqueShortCode(): Promise<string> {
     for (let attempt = 0; attempt < 3; attempt++) {
       const code = generateShortCode()
-      const existing = await prisma.qRCode.findUnique({ where: { shortCode: code } })
+      const existing = await withRetryRead(() =>
+        prisma.qRCode.findUnique({ where: { shortCode: code } }),
+      )
       if (!existing) return code
     }
     throw new Error('Échec de génération d\'un short code unique après 3 tentatives')
   },
 
   async create(data: QRCreateInput): Promise<{ id: string; shortCode: string; svgContent: string }> {
-    const workspace = await prisma.workspace.findUnique({
-      where: { id: data.workspaceId },
-      select: { ownerId: true, owner: { select: { plan: true } } },
-    })
+    const workspace = await withRetryRead(() =>
+      prisma.workspace.findUnique({
+        where: { id: data.workspaceId },
+        select: { ownerId: true, owner: { select: { plan: true } } },
+      }),
+    )
 
     if (!workspace) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Espace de travail introuvable' })
@@ -166,10 +182,12 @@ export const qrService = {
   },
 
   async update(id: string, workspaceId: string, data: QRUpdateInput): Promise<{ id: string; svgContent?: string }> {
-    const existing = await prisma.qRCode.findFirst({
-      where: { id, workspaceId, deletedAt: null },
-      include: { landingPage: true },
-    })
+    const existing = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId, deletedAt: null },
+        include: { landingPage: true },
+      }),
+    )
 
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
@@ -268,26 +286,32 @@ export const qrService = {
   async updateStatus(id: string, workspaceId: string, status: QRStatus, userId: string): Promise<void> {
     // SÉCURITÉ : filtrer les QR codes soft-deleted (deletedAt !== null)
     // pour éviter de modifier le statut d'un élément dans la corbeille
-    const existing = await prisma.qRCode.findFirst({
-      where: { id, workspaceId, deletedAt: null },
-    })
+    const existing = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId, deletedAt: null },
+      }),
+    )
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
     }
 
-    const member = await prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    })
+    const member = await withRetryRead(() =>
+      prisma.workspaceMember.findUnique({
+        where: { workspaceId_userId: { workspaceId, userId } },
+      }),
+    )
     if (!member || member.role === 'VIEWER') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Action non autorisée' })
     }
 
     // RÈGLE MÉTIER : FREE ne peut pas PAUSER
     if (status === 'PAUSED') {
-      const workspaceOwner = await prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { owner: { select: { plan: true } } },
-      })
+      const workspaceOwner = await withRetryRead(() =>
+        prisma.workspace.findUnique({
+          where: { id: workspaceId },
+          select: { owner: { select: { plan: true } } },
+        }),
+      )
       if (workspaceOwner?.owner.plan === 'FREE') {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -303,9 +327,11 @@ export const qrService = {
   },
 
   async softDelete(id: string, workspaceId: string): Promise<void> {
-    const qrCode = await prisma.qRCode.findFirst({
-      where: { id, workspaceId },
-    })
+    const qrCode = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId },
+      }),
+    )
     if (!qrCode) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
     }
@@ -318,25 +344,31 @@ export const qrService = {
   },
 
   async restore(id: string, workspaceId: string): Promise<void> {
-    const qrCode = await prisma.qRCode.findFirst({
-      where: { id, workspaceId, deletedAt: { not: null } },
-    })
+    const qrCode = await withRetryRead(() =>
+      prisma.qRCode.findFirst({
+        where: { id, workspaceId, deletedAt: { not: null } },
+      }),
+    )
     if (!qrCode) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable dans la corbeille' })
     }
 
     // Vérifier le quota avant restauration
-    const workspace = await prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { owner: { select: { plan: true } } },
-    })
+    const workspace = await withRetryRead(() =>
+      prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { owner: { select: { plan: true } } },
+      }),
+    )
     if (workspace) {
       const planKey = workspace.owner.plan as PlanKey
       const limit = PLAN_LIMITS[planKey].maxQRCodes
       if (limit !== Infinity) {
-        const count = await prisma.qRCode.count({
-          where: { workspaceId, deletedAt: null },
-        })
+        const count = await withRetryRead(() =>
+          prisma.qRCode.count({
+            where: { workspaceId, deletedAt: null },
+          }),
+        )
         if (count >= limit) {
           throw new TRPCError({
             code: 'FORBIDDEN',

@@ -2,6 +2,7 @@ import Stripe from "stripe"
 import { TRPCError } from "@trpc/server"
 import { prisma } from "@/server/db"
 import { withRetry } from "@/lib/retry"
+import { withBreaker, stripeBreaker } from "@/lib/circuit-breaker"
 import logger from "@/lib/logger"
 import * as Sentry from "@sentry/nextjs"
 import type { Plan } from "@/types/index"
@@ -35,11 +36,16 @@ export const billingService = {
     let stripeCustomerId = user.stripeCustomerId
 
     if (!stripeCustomerId) {
-      const customer = await getStripe().customers.create({
-        email: user.email,
-        name: user.name ?? undefined,
-        metadata: { userId: user.id },
-      })
+      const customer = await withBreaker<Stripe.Customer>(stripeBreaker, () =>
+        withRetry(() =>
+          getStripe().customers.create({
+            email: user.email,
+            name: user.name ?? undefined,
+            metadata: { userId: user.id },
+          }),
+          { maxRetries: 3, baseDelay: 500 },
+        ),
+      )
       stripeCustomerId = customer.id
 
       await prisma.user.update({
@@ -56,15 +62,18 @@ export const billingService = {
       })
     }
 
-    const session = await withRetry(() =>
-      getStripe().checkout.sessions.create({
-        customer: stripeCustomerId,
-        mode: "subscription",
-        line_items: [{ price: priceId, quantity: 1 }],
-        metadata: { userId: user.id, plan },
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-      })
+    const session = await withBreaker<Stripe.Checkout.Session>(stripeBreaker, () =>
+      withRetry(() =>
+        getStripe().checkout.sessions.create({
+          customer: stripeCustomerId,
+          mode: "subscription",
+          line_items: [{ price: priceId, quantity: 1 }],
+          metadata: { userId: user.id, plan },
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+        }),
+        { maxRetries: 3, baseDelay: 500 },
+      ),
     )
 
     if (!session.url) {
@@ -97,8 +106,11 @@ export const billingService = {
     }
 
     try {
-      const subscription = await withRetry(() =>
-        getStripe().subscriptions.retrieve(user.stripeSubscriptionId!)
+      const subscription = await withBreaker<Stripe.Subscription>(stripeBreaker, () =>
+        withRetry(() =>
+          getStripe().subscriptions.retrieve(user.stripeSubscriptionId!),
+          { maxRetries: 3, baseDelay: 500 },
+        ),
       )
       const item = subscription.items.data[0]
 
@@ -140,9 +152,14 @@ export const billingService = {
     }
 
     try {
-      await getStripe().subscriptions.update(user.stripeSubscriptionId, {
-        cancel_at_period_end: true,
-      })
+      await withBreaker(stripeBreaker, () =>
+        withRetry(() =>
+          getStripe().subscriptions.update(user.stripeSubscriptionId, {
+            cancel_at_period_end: true,
+          }),
+          { maxRetries: 3, baseDelay: 500 },
+        ),
+      )
     } catch {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
