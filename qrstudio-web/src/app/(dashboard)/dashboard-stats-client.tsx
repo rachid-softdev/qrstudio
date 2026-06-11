@@ -29,7 +29,7 @@ function StatCard({
         <div className="text-muted-foreground">{icon}</div>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-bold">{value}</p>
+        <p className="text-2xl font-bold tabular-nums">{value}</p>
       </CardContent>
     </Card>
   )
@@ -84,7 +84,7 @@ export function DashboardStatsClient({ initialData }: DashboardStatsClientProps)
               {stats.topQRCodes.map((qr, index) => (
                 <Link
                   key={qr.id}
-                  href={`/qr/${qr.id}`}
+                  href={`/dashboard/qr/${qr.id}`}
                   className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50"
                 >
                   <div className="flex items-center gap-3">

@@ -33,7 +33,11 @@ const OS_LABELS: Record<string, string> = {
 export function OSChart({ data }: OSChartProps) {
   if (data.length === 0) {
     return (
-      <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+      <div
+        className="flex h-48 items-center justify-center text-sm text-muted-foreground"
+        role="img"
+        aria-label="Aucune donnée de système d'exploitation"
+      >
         Aucune donnée de système d&apos;exploitation
       </div>
     )
@@ -45,8 +49,12 @@ export function OSChart({ data }: OSChartProps) {
   }))
 
   return (
-    <ResponsiveContainer width="100%" height={192}>
-      <PieChart>
+    <figure aria-label="Répartition par système d'exploitation">
+      <figcaption className="sr-only">
+        Systèmes d&apos;exploitation : {chartData.map(d => `${d.name}: ${d.value} scans`).join(", ")}
+      </figcaption>
+      <ResponsiveContainer width="100%" height={192}>
+        <PieChart role="img" aria-label="Graphique en camembert de la répartition par OS">
         <Pie
           data={chartData}
           cx="50%"
@@ -79,5 +87,6 @@ export function OSChart({ data }: OSChartProps) {
         />
       </PieChart>
     </ResponsiveContainer>
+    </figure>
   )
 }
