@@ -5,6 +5,7 @@ import { QrCodeIcon, Trash2Icon } from "lucide-react"
 import { api } from "@/lib/trpc/client"
 import { useQRList } from "@/hooks/use-qr-list"
 import { QRCard } from "@/components/qr/qr-card"
+import { QRCardGrid } from "@/components/qr/qr-card-grid"
 import { EmptyState } from "@/components/shared/empty-state"
 import { Skeleton } from "@/components/shared/loading-skeleton"
 import { Button } from "@/components/ui/button"
@@ -119,6 +120,9 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
     [updateStatusMutation, workspaceId],
   )
 
+  // Derive a filter key so the grid re-animates when filters change
+  const filterKey = JSON.stringify({ type: typeFilter, status: statusFilter, trash: trashFilter, search: debouncedSearch })
+
   if (error) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -167,7 +171,7 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
           />
         )
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <QRCardGrid filterKey={filterKey}>
           {items.map((qr) => (
             <QRCard
               key={qr.id}
@@ -186,7 +190,7 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
               onToggleStatus={handleToggleStatus}
             />
           ))}
-        </div>
+        </QRCardGrid>
       )}
 
       {nextCursor && !isLoading && (

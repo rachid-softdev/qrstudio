@@ -33,3 +33,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - For trivial tasks, execute immediately without overthinking
 
 <!-- END:global-agent-rules -->
+
+<!-- BEGIN:design-context -->
+## Design Context
+
+This project has a formal design system documented at the root:
+
+- **PRODUCT.md** — Strategic register (product), brand personality (fiable·moderne·efficace), anti-references (Linear/Raycast/Vercel energy), 5 design principles
+- **DESIGN.md** — Visual system: "The Workshop" north star, grayscale-dominant palette, Inter single-family, Flat-By-Default elevation (ring borders, no shadows), 5 documented components
+
+Key rules to follow:
+- Monochrome discipline: colour is for signalling, not decorating (only red for danger)
+- Density: 14px body, 8px grid, compact components
+- No shadows at rest — use ring borders for depth
+- Ink (near-black) on Paper (white) is the primary contrast axis
+- No gradient text, glassmorphism, side-stripe borders
+- WCAG 2.1 AA, high contrast, never colour-only states
+- `.impeccable/live/config.json` exists for live variant mode
+<!-- END:design-context -->

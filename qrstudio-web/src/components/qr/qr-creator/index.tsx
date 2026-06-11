@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import type { QRType } from "@/types/index"
 import type { QRCreateInput } from "@/lib/validations"
@@ -24,6 +25,7 @@ interface QRCreatorProps {
 }
 
 export function QRCreator({ workspaceId }: QRCreatorProps) {
+  const router = useRouter()
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState<QRType | null>(null)
   const [content, setContent] = useState<Partial<QRCreateInput>>({})
@@ -67,6 +69,7 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
       setCreatedQrId(result.id)
       setCreatedShortCode(result.shortCode)
       toast.success("QR code créé avec succès !")
+      router.push(`/dashboard/qr/${result.id}`)
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur lors de la création"
       toast.error(message)

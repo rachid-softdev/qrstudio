@@ -40,6 +40,8 @@ export function QRPreview({ data, fgColor, bgColor, moduleShape }: QRPreviewProp
         <div className="relative">
           <canvas
             ref={canvasRef}
+            role="img"
+            aria-label="Aperçu du QR code"
             className="rounded-lg"
             style={{ maxWidth: "100%", height: "auto" }}
           />

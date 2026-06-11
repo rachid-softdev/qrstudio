@@ -77,7 +77,7 @@ export function QRCard({
       role="button"
       tabIndex={trash ? -1 : 0}
       aria-label={trash ? `QR code supprimé : ${name}` : `Voir le QR code : ${name}`}
-      className={`group cursor-pointer transition-shadow hover:shadow-md ${trash ? "opacity-60" : ""}`}
+      className={`group cursor-pointer transition-all hover:ring-2 hover:ring-ring/40 ${trash ? "opacity-60" : ""}`}
       onClick={handleCardClick}
       onKeyDown={handleKeyDown}
     >
@@ -97,7 +97,7 @@ export function QRCard({
             {canEdit && (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  className="opacity-0 group-hover:opacity-100"
+                  className="opacity-60 transition-opacity group-hover:opacity-100"
                 >
                   <Button
                     variant="ghost"
@@ -171,7 +171,10 @@ export function QRCard({
                 Corbeille
               </Badge>
             ) : (
-              <Badge variant={statusVariants[status] ?? "outline"} className="text-xs">
+              <Badge
+                variant={statusVariants[status] ?? "outline"}
+                className="text-xs transition-all duration-200"
+              >
                 {status === "ACTIVE" ? "Actif" : "En pause"}
               </Badge>
             )}

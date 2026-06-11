@@ -68,6 +68,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
+    "@playwright/cli": "^0.1.14",
     "@playwright/test": "^1.60.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
@@ -86,3 +87,4 @@
     "vitest": "^4.1.8"
   }
 }
+
