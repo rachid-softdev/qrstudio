@@ -88,7 +88,7 @@ export function QRListFilters({
           size="sm"
           onClick={() => onTrashChange(!trash)}
         >
-          {trash ? "Corbeille" : "Corbeille"}
+          {trash ? "Liste" : "Corbeille"}
         </Button>
       )}
     </div>

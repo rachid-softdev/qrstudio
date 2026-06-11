@@ -21,7 +21,7 @@ interface WifiFormProps {
 }
 
 export function WifiForm({ onChange, defaultValues }: WifiFormProps) {
-  const { register, watch, setValue } = useForm<WifiFormData>({
+  const { register, watch, setValue, formState: { errors } } = useForm<WifiFormData>({
     resolver: zodResolver(wifiFormSchema),
     defaultValues: { encryption: "WPA", ...defaultValues },
   })
@@ -36,12 +36,13 @@ export function WifiForm({ onChange, defaultValues }: WifiFormProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="ssid">Nom du réseau (SSID)</Label>
+        <Label htmlFor="ssid">Nom du réseau (SSID) <span className="text-destructive">*</span></Label>
         <Input
           id="ssid"
           placeholder="Mon WiFi"
           {...register("ssid", { onChange: handleFieldChange })}
         />
+        {errors.ssid && <p className="text-xs text-destructive">{errors.ssid.message}</p>}
       </div>
 
       <div className="space-y-2">

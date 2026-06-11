@@ -1,20 +1,24 @@
 "use client"
 
 import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ColorPicker } from "./color-picker"
 import { LogoUploader } from "./logo-uploader"
 
-interface LandingFormData {
-  title: string
-  description?: string
-  ctaLabel?: string
-  ctaUrl?: string
-  imageUrl?: string
-  bgColor: string
-  textColor: string
-}
+const landingFormSchema = z.object({
+  title: z.string().min(1, "Le titre est requis"),
+  description: z.string().optional().or(z.literal("")),
+  ctaLabel: z.string().optional().or(z.literal("")),
+  ctaUrl: z.string().url("URL invalide").optional().or(z.literal("")),
+  imageUrl: z.string().optional().or(z.literal("")),
+  bgColor: z.string(),
+  textColor: z.string(),
+})
+
+type LandingFormData = z.infer<typeof landingFormSchema>
 
 interface LandingFormProps {
   onChange: (data: LandingFormData) => void
@@ -22,7 +26,8 @@ interface LandingFormProps {
 }
 
 export function LandingForm({ onChange, defaultValues }: LandingFormProps) {
-  const { register, watch, setValue } = useForm<LandingFormData>({
+  const { register, watch, setValue, formState: { errors } } = useForm<LandingFormData>({
+    resolver: zodResolver(landingFormSchema),
     defaultValues: { bgColor: "#FFFFFF", textColor: "#111827", ...defaultValues },
   })
 
@@ -50,8 +55,9 @@ export function LandingForm({ onChange, defaultValues }: LandingFormProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="lp-title">Titre</Label>
+        <Label htmlFor="lp-title">Titre <span className="text-destructive">*</span></Label>
         <Input id="lp-title" placeholder="Titre de votre page" {...register("title", { onChange: handleChange })} />
+        {errors.title && <p className="text-xs text-destructive">{errors.title.message}</p>}
       </div>
 
       <div className="space-y-2">

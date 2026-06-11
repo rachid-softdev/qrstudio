@@ -45,7 +45,7 @@ export function CurrentPlanBanner({
     switch (status) {
       case "active":
         return (
-          <Badge variant="default" className="gap-1 bg-accent text-accent-foreground border border-accent">
+          <Badge variant="default" className="gap-1">
             <CheckCircleIcon className="size-3" />
             Actif
           </Badge>

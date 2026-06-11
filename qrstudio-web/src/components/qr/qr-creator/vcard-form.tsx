@@ -23,7 +23,7 @@ interface VCardFormProps {
 }
 
 export function VCardForm({ onChange, defaultValues }: VCardFormProps) {
-  const { register, watch } = useForm<VCardFormData>({
+  const { register, watch, formState: { errors } } = useForm<VCardFormData>({
     resolver: zodResolver(vcardFormSchema),
     defaultValues,
   })
@@ -37,13 +37,15 @@ export function VCardForm({ onChange, defaultValues }: VCardFormProps) {
   return (
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-2">
-        <Label htmlFor="firstName">Prénom</Label>
+        <Label htmlFor="firstName">Prénom <span className="text-destructive">*</span></Label>
         <Input id="firstName" placeholder="Jean" {...register("firstName", { onChange: handleChange })} />
+        {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="lastName">Nom</Label>
+        <Label htmlFor="lastName">Nom <span className="text-destructive">*</span></Label>
         <Input id="lastName" placeholder="Dupont" {...register("lastName", { onChange: handleChange })} />
+        {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
       </div>
 
       <div className="space-y-2">

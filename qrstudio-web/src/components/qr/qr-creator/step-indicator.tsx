@@ -48,6 +48,7 @@ export function StepIndicator({ currentStep, steps }: StepIndicatorProps) {
                   "hidden h-px w-8 sm:block",
                   stepNumber < currentStep ? "bg-primary" : "bg-border"
                 )}
+                aria-hidden="true"
               />
             )}
           </div>

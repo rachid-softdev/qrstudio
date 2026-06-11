@@ -1,6 +1,7 @@
 "use client"
 
 import { FileTextIcon } from "lucide-react"
+import { toast } from "sonner"
 import { UploadButton } from "@uploadthing/react"
 import type { OurFileRouter } from "@/app/api/uploadthing/core"
 import { cn } from "@/lib/utils"
@@ -18,7 +19,9 @@ export function PdfUploader({ onUpload, value }: PdfUploaderProps) {
         onClientUploadComplete={(res) => {
           if (res?.[0]?.url) onUpload(res[0].url)
         }}
-        onUploadError={() => {}}
+        onUploadError={(err) => {
+          toast.error("Échec de l'upload du PDF")
+        }}
         content={{
           button({ ready, isUploading }) {
             if (isUploading) return "Upload en cours..."

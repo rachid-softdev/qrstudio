@@ -1,5 +1,6 @@
 "use client"
 
+import { toast } from "sonner"
 import { UploadButton } from "@uploadthing/react"
 import type { OurFileRouter } from "@/app/api/uploadthing/core"
 
@@ -14,7 +15,9 @@ export function LogoUploader({ onUpload }: LogoUploaderProps) {
       onClientUploadComplete={(res) => {
         if (res?.[0]?.url) onUpload(res[0].url)
       }}
-      onUploadError={() => {}}
+      onUploadError={(err) => {
+        toast.error("Échec de l'upload du logo")
+      }}
       content={{
         button({ ready, isUploading }) {
           if (isUploading) return "Upload en cours..."
