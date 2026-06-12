@@ -1,10 +1,11 @@
+import crypto from "crypto"
 import bcrypt from "bcryptjs"
 import { TRPCError } from "@trpc/server"
 import * as Sentry from "@sentry/nextjs"
 import { sign, verify } from "jsonwebtoken"
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
-import { emailService } from "@/server/services/email.service"
+import { emailService, sendPasswordResetEmail } from "@/server/services/email.service"
 import { totpService } from "@/server/services/totp.service"
 import { getStripeClient } from "@/lib/stripe"
 import { checkTotpRateLimit } from "@/lib/rate-limit"
@@ -186,6 +187,111 @@ export const authService = {
       data: { passwordHash },
     })
 
+    emailService.sendPasswordChanged(user.email).catch(() => {
+      /* already logged in emailService */
+    })
+
+    return { success: true }
+  },
+
+  async requestPasswordReset(email: string) {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, name: true },
+    })
+
+    // Ne pas révéler si l'email existe ou non (sécurité)
+    if (!user) {
+      return { success: true }
+    }
+
+    // Supprimer les anciens tokens de réinitialisation pour cet email
+    await prisma.verificationToken.deleteMany({
+      where: { identifier: email },
+    })
+
+    // Générer un nouveau token
+    const resetToken = crypto.randomUUID()
+    const expires = new Date(Date.now() + 60 * 60 * 1000) // 1 heure
+
+    await prisma.verificationToken.create({
+      data: {
+        identifier: email,
+        token: resetToken,
+        expires,
+      },
+    })
+
+    // Envoi asynchrone — ne pas bloquer la réponse
+    sendPasswordResetEmail(email, resetToken).catch(() => {
+      /* already logged in emailService */
+    })
+
+    return { success: true }
+  },
+
+  async resetPassword(token: string, newPassword: string) {
+    passwordSchema.parse(newPassword)
+
+    const stored = await prisma.verificationToken.findUnique({
+      where: { token },
+    })
+
+    if (!stored) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Lien de réinitialisation invalide",
+      })
+    }
+
+    if (stored.expires < new Date()) {
+      // Nettoyer le token expiré
+      await prisma.verificationToken.delete({
+        where: { token },
+      })
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Ce lien de réinitialisation a expiré. Veuillez refaire une demande.",
+      })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: stored.identifier },
+      select: { id: true, email: true, passwordHash: true },
+    })
+
+    if (!user) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Utilisateur introuvable",
+      })
+    }
+
+    if (!user.passwordHash) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Impossible de réinitialiser le mot de passe d'un compte social",
+      })
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12)
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash,
+          loginAttempts: 0,
+          lockoutUntil: null,
+        },
+      }),
+      // Supprimer le token utilisé
+      prisma.verificationToken.delete({
+        where: { token },
+      }),
+    ])
+
+    // Notifier du changement
     emailService.sendPasswordChanged(user.email).catch(() => {
       /* already logged in emailService */
     })

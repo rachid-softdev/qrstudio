@@ -28,6 +28,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetTrigger, SheetContent } from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
+import { ThemeToggle } from "@/components/layout/theme-toggle"
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboardIcon },
@@ -141,6 +142,12 @@ function SidebarContent() {
       <Separator />
 
       <NavLinks className="flex-1" />
+
+      <Separator />
+
+      <div className="flex justify-center">
+        <ThemeToggle />
+      </div>
 
       <Separator />
 

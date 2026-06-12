@@ -67,7 +67,7 @@ export function LoginForm() {
   }
 
   function handleForgotPassword() {
-    toast.info("Contactez le support (V1)")
+    router.push("/forgot-password")
   }
 
   return (

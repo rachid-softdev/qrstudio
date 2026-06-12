@@ -4,6 +4,7 @@ import "./globals.css"
 import * as Sentry from "@sentry/nextjs"
 import { cn } from "@/lib/utils"
 import { TRPCProvider } from "@/components/shared/trpc-provider"
+import { ThemeProvider } from "next-themes"
 import { Toaster } from "@/components/ui/sonner"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
@@ -32,13 +33,16 @@ export default function RootLayout({
     <html
       lang="fr"
       className={cn("h-full", inter.variable, "font-sans", geist.variable)}
+      suppressHydrationWarning
     >
       <body className="min-h-full antialiased">
         <Sentry.ErrorBoundary fallback={<p>Une erreur est survenue</p>}>
-          <TRPCProvider>
-            {children}
-            <Toaster />
-          </TRPCProvider>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+            <TRPCProvider>
+              {children}
+              <Toaster />
+            </TRPCProvider>
+          </ThemeProvider>
         </Sentry.ErrorBoundary>
       </body>
     </html>

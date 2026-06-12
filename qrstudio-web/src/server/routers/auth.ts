@@ -115,4 +115,21 @@ export const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       return authService.disableTotp(ctx.user.id, input.password)
     }),
+
+  // ─── Password Reset ─────────────────────────────────────────────────────────
+
+  requestPasswordReset: publicProcedure
+    .input(z.object({ email: z.string().email("Email invalide") }))
+    .mutation(async ({ input }) => {
+      return authService.requestPasswordReset(input.email)
+    }),
+
+  resetPassword: publicProcedure
+    .input(z.object({
+      token: z.string().min(1, "Token requis"),
+      newPassword: z.string().min(8, "Le mot de passe doit contenir au moins 8 caractères"),
+    }))
+    .mutation(async ({ input }) => {
+      return authService.resetPassword(input.token, input.newPassword)
+    }),
 })
