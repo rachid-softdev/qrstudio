@@ -3,10 +3,12 @@
 import { useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { ChevronDownIcon } from "lucide-react"
 import type { QRType } from "@/types/index"
 import type { QRCreateInput } from "@/lib/validations"
 import type { ModuleShape } from "@/lib/qr-generator"
 import { computeQRData } from "@/lib/qr-utils"
+import { cn } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
 import { StepIndicator } from "./step-indicator"
 import { QRPreview } from "./qr-preview"
@@ -41,6 +43,7 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
   const [loading, setLoading] = useState(false)
   const [createdQrId, setCreatedQrId] = useState<string | null>(null)
   const [createdShortCode, setCreatedShortCode] = useState<string | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
 
   const utils = api.useUtils()
   const createMutation = api.qr.create.useMutation()
@@ -159,7 +162,8 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
           onExportPdf={handleExportPdf}
         />
 
-        <div className="space-y-4">
+        {/* Desktop: always visible */}
+        <div className="hidden space-y-4 lg:block">
           <h3 className="text-sm font-medium text-muted-foreground">Aperçu</h3>
           <QRPreview
             data={qrData}
@@ -167,6 +171,35 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
             bgColor={design.bgColor}
             moduleShape={design.moduleShape}
           />
+        </div>
+
+        {/* Mobile: collapsible accordion */}
+        <div className="lg:hidden">
+          <button
+            type="button"
+            onClick={() => setShowPreview(!showPreview)}
+            className="flex w-full items-center justify-between rounded-lg border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            aria-expanded={showPreview}
+            aria-controls="mobile-preview"
+          >
+            Aperçu
+            <ChevronDownIcon
+              className={cn(
+                "size-4 transition-transform",
+                showPreview && "rotate-180"
+              )}
+            />
+          </button>
+          {showPreview && (
+            <div id="mobile-preview" className="mt-4">
+              <QRPreview
+                data={qrData}
+                fgColor={design.fgColor}
+                bgColor={design.bgColor}
+                moduleShape={design.moduleShape}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

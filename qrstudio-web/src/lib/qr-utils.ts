@@ -1,49 +1,21 @@
-import { z } from "zod"
 import type { QRType } from "@/types/index"
+import type { QRCreateInput } from "@/lib/validations"
 
-const contentSchema = z.object({
-  destinationUrl: z.string().optional(),
-  wifi: z
-    .object({
-      ssid: z.string(),
-      password: z.string().optional(),
-      encryption: z.string().optional(),
-    })
-    .optional(),
-  vcard: z
-    .object({
-      firstName: z.string().optional(),
-      lastName: z.string().optional(),
-      email: z.string().optional(),
-      phone: z.string().optional(),
-      company: z.string().optional(),
-      website: z.string().optional(),
-    })
-    .optional(),
-  textContent: z.string().optional(),
-})
-
-function parseContent(raw: Record<string, unknown>): z.infer<typeof contentSchema> {
-  const parsed = contentSchema.safeParse(raw)
-  return parsed.success ? parsed.data : {}
-}
-
-export function computeQRData(type: QRType, content: Record<string, unknown>): string {
-  const data = parseContent(content)
+export function computeQRData(type: QRType, content: Partial<QRCreateInput>): string {
   switch (type) {
     case "URL":
-      return data.destinationUrl ?? ""
+      return content.destinationUrl ?? ""
     case "WHATSAPP": {
-      const phone = data.destinationUrl ?? ""
+      const phone = content.destinationUrl ?? ""
       return `https://wa.me/${phone.replace(/[^0-9]/g, "")}`
     }
     case "WIFI": {
-      const wifi = data.wifi
+      const wifi = content.wifi
       if (!wifi?.ssid) return ""
       return `WIFI:T:${wifi.encryption ?? "nopass"};S:${wifi.ssid};${wifi.password ? `P:${wifi.password};` : ""}`
     }
     case "VCARD": {
-      const vcard = data.vcard
+      const vcard = content.vcard
       if (!vcard?.firstName && !vcard?.lastName) return ""
       const lines = ["BEGIN:VCARD", "VERSION:3.0"]
       if (vcard.firstName || vcard.lastName) {
@@ -58,9 +30,9 @@ export function computeQRData(type: QRType, content: Record<string, unknown>): s
       return lines.join("\n")
     }
     case "PDF":
-      return data.destinationUrl ?? ""
+      return content.destinationUrl ?? ""
     case "TEXT":
-      return data.textContent ?? ""
+      return content.textContent ?? ""
     case "LANDING_PAGE":
       return `page_${Date.now()}`
   }
