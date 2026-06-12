@@ -11,6 +11,7 @@ import { DeviceChart } from "@/components/qr/device-chart"
 import { OSChart } from "@/components/qr/os-chart"
 import { ExportCSVButton } from "@/components/qr/export-csv-button"
 import { EmptyState } from "@/components/shared/empty-state"
+import { Skeleton } from "@/components/shared/loading-skeleton"
 import { useAnalytics } from "@/hooks/use-analytics"
 import { formatNumber } from "@/lib/utils"
 import type { Period } from "@/lib/validations"
@@ -55,10 +56,10 @@ export function AnalyticsSection({
       <CardContent className="space-y-6">
         {isLoading && !analytics ? (
           <div className="space-y-4">
-            <div className="h-64 animate-pulse rounded-lg bg-muted" />
+            <Skeleton className="h-64 w-full" />
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+                <Skeleton key={i} className="h-24 w-full" />
               ))}
             </div>
           </div>

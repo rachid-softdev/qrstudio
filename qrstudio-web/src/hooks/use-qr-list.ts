@@ -27,11 +27,11 @@ export function useQRList(filters: UseQRListFilters) {
     )
 
   const items = data?.pages.flatMap((page) => page.items) ?? []
-  const total = items.length
+  const totalCount = data?.pages[0]?.totalCount ?? 0
 
   return {
     items,
-    total,
+    totalCount,
     nextCursor: data?.pages[data.pages.length - 1]?.nextCursor,
     isLoading,
     isFetchingNextPage,

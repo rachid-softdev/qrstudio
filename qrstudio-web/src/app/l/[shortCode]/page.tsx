@@ -96,7 +96,7 @@ export default async function LandingPageView({ params }: Props) {
             href={lp.ctaUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-6 inline-flex h-12 items-center justify-center rounded-xl bg-primary px-8 text-base font-medium text-primary-foreground shadow-lg transition-transform hover:scale-105"
+            className="mt-6 inline-flex h-12 items-center justify-center rounded-xl px-8 text-base font-medium transition-all active:translate-y-px"
             style={{
               backgroundColor: lp.textColor,
               color: lp.bgColor,

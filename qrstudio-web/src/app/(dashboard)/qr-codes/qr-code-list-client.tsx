@@ -46,7 +46,7 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
     }
   }, [])
 
-  const { items, isLoading, isFetchingNextPage, error, fetchMore, nextCursor } =
+  const { items, totalCount, isLoading, isFetchingNextPage, error, fetchMore, nextCursor } =
     useQRList({
       workspaceId,
       search: debouncedSearch || undefined,
@@ -194,7 +194,10 @@ export function QRCodeListClient({ workspaceId }: QRCodeListClientProps) {
       )}
 
       {nextCursor && !isLoading && (
-        <div className="flex justify-center pt-4">
+        <div className="flex flex-col items-center gap-3 pt-4">
+          <p className="text-xs text-muted-foreground">
+            {items.length}{" "}sur{" "}{totalCount}{" "}QR code{totalCount > 1 ? "s" : ""}
+          </p>
           <Button
             variant="outline"
             size="sm"

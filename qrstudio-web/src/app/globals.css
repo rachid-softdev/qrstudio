@@ -27,6 +27,9 @@
       opacity: 1;
       transform: translateY(0);
     }
+    .animate-pulse {
+      animation: none;
+    }
   }
 }
 
@@ -43,10 +46,10 @@
     --secondary: 0.97 0 0;
     --secondary-foreground: 0.205 0 0;
     --muted: 0.97 0 0;
-    --muted-foreground: 0.556 0 0;
+    --muted-foreground: 0.50 0 0;
     --accent: 0.97 0 0;
     --accent-foreground: 0.205 0 0;
-    --destructive: 0.577 0.245 27.325;
+    --destructive: 0.45 0.245 27.325;
     --destructive-foreground: 0.985 0 0;
     --border: 0.922 0 0;
     --input: 0.922 0 0;
@@ -57,14 +60,7 @@
     --chart-3: 0.439 0 0;
     --chart-4: 0.371 0 0;
     --chart-5: 0.269 0 0;
-    --sidebar: 0.985 0 0;
-    --sidebar-foreground: 0.145 0 0;
-    --sidebar-primary: 0.205 0 0;
-    --sidebar-primary-foreground: 0.985 0 0;
-    --sidebar-accent: 0.97 0 0;
-    --sidebar-accent-foreground: 0.205 0 0;
-    --sidebar-border: 0.922 0 0;
-    --sidebar-ring: 0.708 0 0;
+    /* sidebar tokens — reserved for future use */
   }
 
   .dark {
@@ -92,18 +88,10 @@
     --chart-3: 0.439 0 0;
     --chart-4: 0.371 0 0;
     --chart-5: 0.269 0 0;
-    --sidebar: 0.205 0 0;
-    --sidebar-foreground: 0.985 0 0;
-    --sidebar-primary: 0.488 0.243 264.376;
-    --sidebar-primary-foreground: 0.985 0 0;
-    --sidebar-accent: 0.269 0 0;
-    --sidebar-accent-foreground: 0.985 0 0;
-    --sidebar-border: 1 0 0 / 10%;
-    --sidebar-ring: 0.556 0 0;
+    /* sidebar tokens — reserved for future use */
   }
   .theme {
-    --font-heading: var(--font-sans);
-    --font-sans: var(--font-sans);
+    --font-heading: var(--font-inter);
   }
   * {
     @apply border-border outline-ring/50;
@@ -118,6 +106,9 @@
 
 /* WCAG 2.5.8 — Touch targets ≥44px on touch devices */
 @media (pointer: coarse) {
+  button,
+  a,
+  [role="button"],
   [data-slot="button"] {
     min-height: 44px;
     min-width: 44px;

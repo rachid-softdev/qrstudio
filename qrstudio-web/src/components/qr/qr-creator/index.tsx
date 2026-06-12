@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { ChevronDownIcon } from "lucide-react"
@@ -47,6 +47,20 @@ export function QRCreator({ workspaceId }: QRCreatorProps) {
 
   const utils = api.useUtils()
   const createMutation = api.qr.create.useMutation()
+
+  const hasUnsaved = step > 1 && !createdQrId
+
+  // Warn before leaving if unsaved changes
+  useEffect(() => {
+    if (!hasUnsaved) return
+
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault()
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [hasUnsaved])
 
   const qrData = selectedType ? computeQRData(selectedType, content) : ""
 

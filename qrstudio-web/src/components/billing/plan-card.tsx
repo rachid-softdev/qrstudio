@@ -37,7 +37,7 @@ export function PlanCard({
     <Card
       className={cn(
         "relative flex flex-col",
-        highlighted && "border-primary shadow-lg"
+        highlighted && "border-primary ring-2 ring-primary/20"
       )}
     >
       {highlighted && (
