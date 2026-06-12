@@ -13,6 +13,7 @@ import { QRPreview } from "@/components/qr/qr-creator/qr-preview"
 import { computeQRData } from "@/lib/qr-utils"
 import { api } from "@/lib/trpc/client"
 import type { QRType } from "@/types/index"
+import type { QRCreateInput } from "@/lib/validations"
 import type { ModuleShape } from "@/lib/qr-generator"
 
 interface QREditorProps {
@@ -35,22 +36,20 @@ export function QREditor({ qrCode }: QREditorProps) {
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState("destination")
 
-  const [content, setContent] = useState<Record<string, unknown>>(() => {
-    const meta = (qrCode.metadata as Record<string, unknown>) ?? {}
-    const base: Record<string, unknown> = {
-      destinationUrl: (meta.destinationUrl as string) ?? "",
+  const [content, setContent] = useState<Partial<QRCreateInput>>(() => {
+    const meta = qrCode.metadata as Record<string, unknown> | null
+    return {
+      destinationUrl: (meta?.destinationUrl as string | undefined) ?? "",
+      ...(qrCode.type === "WIFI"
+        ? { wifi: (meta?.wifi as QRCreateInput["wifi"]) ?? { ssid: "", encryption: "nopass" as const } }
+        : {}),
+      ...(qrCode.type === "VCARD"
+        ? { vcard: (meta?.vcard as QRCreateInput["vcard"]) ?? {} }
+        : {}),
+      ...(qrCode.type === "TEXT"
+        ? { textContent: (meta?.textContent as string | undefined) ?? "" }
+        : {}),
     }
-    if (qrCode.type === "WIFI") {
-      const wifi = meta.wifi as Record<string, string> | undefined
-      base.wifi = wifi ?? { ssid: "", password: "", encryption: "nopass" }
-    }
-    if (qrCode.type === "VCARD") {
-      base.vcard = meta.vcard ?? {}
-    }
-    if (qrCode.type === "TEXT") {
-      base.textContent = (meta.textContent as string) ?? ""
-    }
-    return base
   })
 
   const [design, setDesign] = useState({
@@ -67,21 +66,21 @@ export function QREditor({ qrCode }: QREditorProps) {
   async function handleSave() {
     setSaving(true)
     try {
-      const payload: Record<string, unknown> = {
+      const payload: Parameters<typeof updateMutation.mutateAsync>[0] = {
         id: qrCode.id,
         name: qrCode.name,
         ...content,
-        ...design,
+        fgColor: design.fgColor,
+        bgColor: design.bgColor,
+        moduleShape: design.moduleShape,
+        frameType: design.frameType ?? undefined,
+        frameLabel: design.frameLabel || undefined,
+        logoUrl: design.logoUrl ?? undefined,
       }
 
-      if (payload.frameLabel === "") payload.frameLabel = undefined
-      if (!payload.destinationUrl && qrCode.type !== "WIFI" && qrCode.type !== "VCARD" && qrCode.type !== "TEXT") {
-        delete payload.destinationUrl
-      }
-
-      await updateMutation.mutateAsync(payload as Parameters<typeof updateMutation.mutateAsync>[0])
+      await updateMutation.mutateAsync(payload)
       toast.success("QR code mis à jour")
-      router.push(`/qr/${qrCode.id}`)
+      router.push(`/dashboard/qr/${qrCode.id}`)
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erreur lors de la mise à jour"
       toast.error(message)

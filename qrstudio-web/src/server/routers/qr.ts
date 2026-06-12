@@ -121,7 +121,7 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Action non autorisée' })
       }
 
-      return qrService.update(id, workspaceId, data as Parameters<typeof qrService.update>[2])
+      return qrService.update(id, workspaceId, data)
     }),
 
   updateStatus: workspaceProcedure
