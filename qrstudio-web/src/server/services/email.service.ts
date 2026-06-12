@@ -175,6 +175,40 @@ export const emailService = {
   },
 }
 
+export async function sendPasswordResetEmail(email: string, resetToken: string): Promise<void> {
+  const client = createResendClient()
+  if (!client) return
+
+  const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/reset-password/${resetToken}`
+
+  try {
+    await withBreaker(resendBreaker, () =>
+      withRetry(() =>
+        client.emails.send({
+          from: FROM_ADDRESS,
+          to: email,
+          subject: "Réinitialisation de votre mot de passe QR Studio",
+          html: wrapHtml(`
+            <h1>Réinitialisation de mot de passe</h1>
+            <p>Vous avez demandé la réinitialisation de votre mot de passe QR Studio.</p>
+            <p>Cliquez sur le bouton ci-dessous pour définir un nouveau mot de passe :</p>
+            <p style="text-align:center;margin-top:24px;">
+              <a href="${resetUrl}" style="display:inline-block;background:#111827;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500;">
+                Réinitialiser le mot de passe
+              </a>
+            </p>
+            <p style="font-size:12px;color:#9ca3af;">Ce lien expire dans 1 heure. Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
+          `),
+        }),
+        { maxRetries: 3, baseDelay: 500 },
+      ),
+    )
+  } catch (error) {
+    logger.error(error, "Erreur envoi email réinitialisation mot de passe")
+    Sentry.captureException(error)
+  }
+}
+
 export async function sendDowngradeNotification(email: string, name?: string): Promise<void> {
   const client = createResendClient()
   if (!client) return

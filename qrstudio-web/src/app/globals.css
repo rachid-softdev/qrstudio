@@ -115,3 +115,11 @@
     @apply font-sans;
   }
 }
+
+/* WCAG 2.5.8 — Touch targets ≥44px on touch devices */
+@media (pointer: coarse) {
+  [data-slot="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
