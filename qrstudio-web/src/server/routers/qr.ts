@@ -1,6 +1,12 @@
 import { z } from "zod"
 import { TRPCError } from "@trpc/server"
-import { workspaceProcedure, router, requireWorkspaceAccess } from "@/server/trpc"
+import {
+  workspaceProcedure,
+  workspaceEditorProcedure,
+  workspaceOwnerProcedure,
+  router,
+  requireWorkspaceAccess,
+} from "@/server/trpc"
 import { prisma } from "@/server/db"
 import { qrService } from "@/server/services/qr.service"
 import { analyticsService, analyticsExportService } from "@/server/services/analytics.service"
@@ -11,10 +17,6 @@ import type { QRStatus } from "@prisma/client"
 const QRTypeEnum = z.enum(['URL','WHATSAPP','WIFI','VCARD','PDF','TEXT','LANDING_PAGE'])
 const QRStatusEnum = z.enum(['ACTIVE','PAUSED'])
 const PeriodEnum = z.enum(['7d','30d','90d','all'])
-
-const workspaceQuery = async (ctx: { user: { id: string } }, workspaceId: string) => {
-  return requireWorkspaceAccess(ctx.user.id, workspaceId)
-}
 
 export const qrRouter = router({
   list: workspaceProcedure
@@ -30,7 +32,7 @@ export const qrRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       const where: Record<string, unknown> = { workspaceId: input.workspaceId, deletedAt: input.trash ? { not: null } : null }
       if (input.type) where.type = input.type
       if (input.status) where.status = input.status
@@ -64,7 +66,7 @@ export const qrRouter = router({
   getById: workspaceProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
 
       // #5: DTO projection — select only exposed fields (no internal Prisma entity leak)
       const select = {
@@ -99,15 +101,14 @@ export const qrRouter = router({
   create: workspaceProcedure
     .input(QRCreateSchema)
     .mutation(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       return qrService.create(input)
     }),
 
-  update: workspaceProcedure
+  update: workspaceEditorProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }).merge(QRUpdateSchema))
     .mutation(async ({ ctx, input }) => {
       const { id, workspaceId, ...data } = input
-      const workspace = await workspaceQuery(ctx, workspaceId)
 
       const existing = await prisma.qRCode.findFirst({
         where: { id, workspaceId },
@@ -117,49 +118,33 @@ export const qrRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'QR code introuvable' })
       }
 
-      if (workspace.role === 'VIEWER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Action non autorisée' })
-      }
-
       return qrService.update(id, workspaceId, data)
     }),
 
-  updateStatus: workspaceProcedure
+  updateStatus: workspaceEditorProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string(), status: QRStatusEnum }))
     .mutation(async ({ ctx, input }) => {
       await qrService.updateStatus(input.id, input.workspaceId, input.status as QRStatus, ctx.user!.id)
       return { success: true }
     }),
 
-  delete: workspaceProcedure
+  delete: workspaceOwnerProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const workspace = await workspaceQuery(ctx, input.workspaceId)
-      if (workspace.role !== 'OWNER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut supprimer un QR code' })
-      }
       await qrService.softDelete(input.id, input.workspaceId)
       return { success: true }
     }),
 
-  restore: workspaceProcedure
+  restore: workspaceOwnerProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const workspace = await workspaceQuery(ctx, input.workspaceId)
-      if (workspace.role !== 'OWNER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut restaurer un QR code' })
-      }
       await qrService.restore(input.id, input.workspaceId)
       return { success: true }
     }),
 
-  permanentDelete: workspaceProcedure
+  permanentDelete: workspaceOwnerProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const workspace = await workspaceQuery(ctx, input.workspaceId)
-      if (workspace.role !== 'OWNER') {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Seul le propriétaire peut supprimer définitivement un QR code' })
-      }
       await qrService.permanentDelete(input.id, input.workspaceId)
       return { success: true }
     }),
@@ -167,7 +152,7 @@ export const qrRouter = router({
   getAnalytics: workspaceProcedure
     .input(z.object({ qrCodeId: z.string(), workspaceId: z.string(), period: PeriodEnum.default('30d') }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
 
       // Récupérer le plan pour calculer la rétention
       const user = await prisma.user.findUnique({
@@ -191,14 +176,14 @@ export const qrRouter = router({
   getDashboardStats: workspaceProcedure
     .input(z.object({ workspaceId: z.string() }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       return analyticsService.getDashboardStats(input.workspaceId)
     }),
 
   exportCsv: workspaceProcedure
     .input(z.object({ qrCodeId: z.string(), workspaceId: z.string(), period: PeriodEnum.default('30d') }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       const existing = await prisma.qRCode.findFirst({
         where: { id: input.qrCodeId, workspaceId: input.workspaceId },
       })
@@ -218,7 +203,7 @@ export const qrRouter = router({
       cursor: z.string().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       const existing = await prisma.qRCode.findFirst({
         where: { id: input.qrCodeId, workspaceId: input.workspaceId },
       })
@@ -233,7 +218,7 @@ export const qrRouter = router({
   exportSvg: workspaceProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       const qrCode = await prisma.qRCode.findFirst({
         where: { id: input.id, workspaceId: input.workspaceId },
       })
@@ -256,7 +241,7 @@ export const qrRouter = router({
   exportPng: workspaceProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string(), size: z.number().min(100).max(2000).default(800) }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       const qrCode = await prisma.qRCode.findFirst({
         where: { id: input.id, workspaceId: input.workspaceId },
       })
@@ -279,7 +264,7 @@ export const qrRouter = router({
   exportPdf: workspaceProcedure
     .input(z.object({ id: z.string(), workspaceId: z.string() }))
     .query(async ({ ctx, input }) => {
-      await workspaceQuery(ctx, input.workspaceId)
+      await requireWorkspaceAccess(ctx.user!.id, input.workspaceId)
       const qrCode = await prisma.qRCode.findFirst({
         where: { id: input.id, workspaceId: input.workspaceId },
       })

@@ -188,6 +188,44 @@ export function requireRole(role: string, requiredRoles: string[]): void {
   }
 }
 
-// workspaceProcedure = protectedProcedure (garantit juste l'auth)
-// La vérification workspace est faite via requireWorkspaceAccess() dans chaque procédure
+// Middleware factory: checks workspace access + role
+// Expects `workspaceId` in the raw input of the procedure.
+// Throws FORBIDDEN if the user is not a member of the workspace
+// or if their role is not in `allowedRoles`.
+export function requireWorkspaceRole(allowedRoles: string[]) {
+  return t.middleware(async ({ ctx, next, rawInput }) => {
+    const input = rawInput as Record<string, unknown> | null
+    const workspaceId = typeof input?.workspaceId === "string" ? input.workspaceId : undefined
+    if (!workspaceId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "workspaceId requis" })
+    }
+    const workspace = await requireWorkspaceAccess(ctx.user!.id, workspaceId)
+    if (!allowedRoles.includes(workspace.role)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: `Action réservée aux rôles : ${allowedRoles.join(", ")}`,
+      })
+    }
+    return next({ ctx: { ...ctx, workspace } })
+  })
+}
+
+/**
+ * Procedures with pre-configured role guards.
+ *
+ *   workspaceProcedure       → authenticated, CSRF-protected (no role check)
+ *   workspaceEditorProcedure → blocks VIEWER (for edit mutations)
+ *   workspaceOwnerProcedure  → only OWNER (for destructive operations)
+ */
+
 export const workspaceProcedure = protectedProcedure
+
+/** Autorise OWNER + EDITOR, bloque VIEWER */
+export const workspaceEditorProcedure = protectedProcedure.use(
+  requireWorkspaceRole(["OWNER", "EDITOR"]),
+)
+
+/** Autorise OWNER uniquement */
+export const workspaceOwnerProcedure = protectedProcedure.use(
+  requireWorkspaceRole(["OWNER"]),
+)

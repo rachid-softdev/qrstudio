@@ -1,6 +1,8 @@
 import QRCode from 'qrcode'
 import { URL } from 'url'
 import dns from 'dns/promises'
+import fs from 'fs/promises'
+import path from 'path'
 import http from 'http'
 import https from 'https'
 import net from 'net'
@@ -338,23 +340,26 @@ const ALLOWED_FRAME_TYPES = new Set([
   'bold', 'dashed', 'elegant', 'minimal', 'neon', 'rounded',
 ])
 
-export function loadFrameSvg(frameType: string): string | null {
+// Cache mémoire pour les fichiers SVG de frames (lus une seule fois)
+const frameCache = new Map<string, string | null>()
+
+export async function loadFrameSvg(frameType: string): Promise<string | null> {
   // Block path traversal: only allow known frame types
   if (!ALLOWED_FRAME_TYPES.has(frameType)) {
     return null
   }
 
+  // Retourne le cache s'il existe
+  const cached = frameCache.get(frameType)
+  if (cached !== undefined) return cached
+
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require('fs')
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const path = require('path')
     const framePath = path.join(process.cwd(), 'public', 'qr-frames', `frame-${frameType}.svg`)
-    if (fs.existsSync(framePath)) {
-      return fs.readFileSync(framePath, 'utf-8')
-    }
-    return null
+    const content = await fs.readFile(framePath, 'utf-8')
+    frameCache.set(frameType, content)
+    return content
   } catch {
+    frameCache.set(frameType, null)
     return null
   }
 }
@@ -411,7 +416,7 @@ export async function generateQRSvg(data: string, options: QRDesignOptions): Pro
   }
 
   if (options.frameType) {
-    const frameSvg = loadFrameSvg(options.frameType)
+    const frameSvg = await loadFrameSvg(options.frameType)
     if (frameSvg) {
       processedSvg = addFrameToSvg(processedSvg, frameSvg, options.frameLabel)
     }
