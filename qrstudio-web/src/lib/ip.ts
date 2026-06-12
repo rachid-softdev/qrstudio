@@ -1,11 +1,12 @@
 import { createHmac } from "crypto"
+import logger from "@/lib/logger"
 
 let ipHashSecret: string | null = null
 function getIpHashSecret(): string {
   if (!ipHashSecret) {
     ipHashSecret = process.env.IP_HASH_SECRET ?? ""
     if (!ipHashSecret) {
-      console.warn("[ip] IP_HASH_SECRET non défini — utilisation d'une dérivation de secours (moins sécurisé)")
+      logger.warn("IP_HASH_SECRET non défini — utilisation d'une dérivation de secours (moins sécurisé)")
       ipHashSecret = "qr-studio-fallback-secret-do-not-use-in-production"
     }
   }

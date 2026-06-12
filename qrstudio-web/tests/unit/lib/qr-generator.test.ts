@@ -93,8 +93,8 @@ describe("loadFrameSvg", () => {
     vi.clearAllMocks()
   })
 
-  it("should return SVG content for a valid frame type that exists on disk", () => {
-    const result = loadFrameSvg("minimal")
+  it("should return SVG content for a valid frame type that exists on disk", async () => {
+    const result = await loadFrameSvg("minimal")
     // If the frame file exists on disk, it returns the SVG content.
     // If not (e.g. CI), it returns null — either is acceptable.
     if (result !== null) {
@@ -102,20 +102,20 @@ describe("loadFrameSvg", () => {
     }
   })
 
-  it("should return null for frame types that don't have a corresponding file", () => {
+  it("should return null for frame types that don't have a corresponding file", async () => {
     // Even for valid frame types, if the file doesn't exist, returns null
-    const result = loadFrameSvg("nonexistent")
+    const result = await loadFrameSvg("nonexistent")
     expect(result).toBeNull()
   })
 
-  it("should not crash on any string input (graceful degradation)", () => {
-    // Path traversal strings should not crash the function
-    expect(() => loadFrameSvg("../../etc/passwd")).not.toThrow()
-    expect(() => loadFrameSvg("..\\..\\windows\\system32")).not.toThrow()
-    expect(() => loadFrameSvg("%2e%2e%2f%2e%2e%2f")).not.toThrow()
-    expect(() => loadFrameSvg("")).not.toThrow()
-    expect(() => loadFrameSvg(null as unknown as string)).not.toThrow()
-    expect(() => loadFrameSvg(undefined as unknown as string)).not.toThrow()
+  it("should not crash on any string input (graceful degradation)", async () => {
+    // Path traversal strings should resolve to null (rejected by ALLOWED_FRAME_TYPES)
+    await expect(loadFrameSvg("../../etc/passwd")).resolves.toBeNull()
+    await expect(loadFrameSvg("..\\..\\windows\\system32")).resolves.toBeNull()
+    await expect(loadFrameSvg("%2e%2e%2f%2e%2e%2f")).resolves.toBeNull()
+    await expect(loadFrameSvg("")).resolves.toBeNull()
+    await expect(loadFrameSvg(null as unknown as string)).resolves.toBeNull()
+    await expect(loadFrameSvg(undefined as unknown as string)).resolves.toBeNull()
   })
 })
 

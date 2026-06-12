@@ -4,9 +4,12 @@ const level =
   process.env.LOG_LEVEL ??
   (process.env.NODE_ENV === "production" ? "info" : "debug")
 
+const isTest = process.env.NODE_ENV === "test"
+
 const logger = pino({
   level,
   base: undefined,
+  ...(isTest ? { enabled: false } : {}),
   serializers: {
     err: pino.stdSerializers.err,
   },
@@ -25,15 +28,6 @@ const logger = pino({
     ],
     censor: "[REDACTED]",
   },
-  // Pretty-print only in development (not test or production)
-  ...(process.env.NODE_ENV === "development"
-    ? {
-        transport: {
-          target: "pino-pretty",
-          options: { colorize: true },
-        },
-      }
-    : {}),
 })
 
 export default logger
