@@ -43,16 +43,19 @@ export const qrRouter = router({
         ]
       }
 
-      const items = await prisma.qRCode.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        take: input.limit + 1,
-        cursor: input.cursor ? { id: input.cursor } : undefined,
-        select: {
-          id: true, shortCode: true, name: true, type: true,
-          status: true, totalScans: true, lastScannedAt: true, createdAt: true,
-        },
-      })
+      const [items, totalCount] = await Promise.all([
+        prisma.qRCode.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: input.limit + 1,
+          cursor: input.cursor ? { id: input.cursor } : undefined,
+          select: {
+            id: true, shortCode: true, name: true, type: true,
+            status: true, totalScans: true, lastScannedAt: true, createdAt: true,
+          },
+        }),
+        prisma.qRCode.count({ where }),
+      ])
 
       let nextCursor: string | undefined
       if (items.length > input.limit) {
@@ -60,7 +63,7 @@ export const qrRouter = router({
         nextCursor = next?.id
       }
 
-      return { items, nextCursor }
+      return { items, nextCursor, totalCount }
     }),
 
   getById: workspaceProcedure

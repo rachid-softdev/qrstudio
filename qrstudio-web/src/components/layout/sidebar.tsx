@@ -9,6 +9,7 @@ import {
   UsersIcon,
   CreditCardIcon,
   SettingsIcon,
+  HelpCircleIcon,
   LogOutIcon,
   UserIcon,
   MenuIcon,
@@ -36,19 +37,21 @@ const navLinks = [
   { href: "/dashboard/team", label: "Équipe", icon: UsersIcon },
   { href: "/dashboard/billing", label: "Facturation", icon: CreditCardIcon },
   { href: "/dashboard/settings", label: "Paramètres", icon: SettingsIcon },
+  { href: "/dashboard/aide", label: "Aide", icon: HelpCircleIcon },
 ] as const
 
 function NavLinks({ className }: { className?: string }) {
   const pathname = usePathname()
 
   return (
-    <nav className={cn("flex flex-col gap-1", className)}>
+    <nav aria-label="Navigation principale" className={cn("flex flex-col gap-1", className)}>
       {navLinks.map(({ href, label, icon: Icon }) => {
         const isActive = pathname === href
         return (
           <Link
             key={href}
             href={href}
+            aria-current={isActive ? "page" : undefined}
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               isActive
@@ -135,7 +138,7 @@ function PlanBadge() {
 function SidebarContent() {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
-      <Link href="/dashboard">
+      <Link href="/dashboard" aria-label="Accueil">
         <Logo size="sm" />
       </Link>
 

@@ -228,8 +228,8 @@ export default function SecuritySettingsPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {totpEnabled ? (
-                  <div className="flex size-10 items-center justify-center rounded-full bg-emerald-500/10">
-                    <ShieldIcon className="size-5 text-emerald-500" />
+                  <div className="flex size-10 items-center justify-center rounded-full bg-primary/10">
+                    <ShieldIcon className="size-5 text-primary" />
                   </div>
                 ) : (
                   <div className="flex size-10 items-center justify-center rounded-full bg-muted">
@@ -428,8 +428,8 @@ export default function SecuritySettingsPage() {
               </DialogHeader>
 
               <div className="space-y-4 py-2">
-                <div className="rounded-lg border bg-amber-50 p-3 dark:bg-amber-950/20">
-                  <p className="text-xs text-amber-800 dark:text-amber-300">
+                <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3">
+                  <p className="text-xs text-destructive">
                     <strong>Important :</strong> Téléchargez ou copiez ces codes
                     maintenant. Ils ne seront plus jamais affichés.
                   </p>

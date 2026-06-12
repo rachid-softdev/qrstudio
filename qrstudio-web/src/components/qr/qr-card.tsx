@@ -68,7 +68,10 @@ export function QRCard({
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !trash) router.push(`/dashboard/qr/${id}`)
+    if ((e.key === "Enter" || e.key === " ") && !trash) {
+      e.preventDefault()
+      router.push(`/dashboard/qr/${id}`)
+    }
   }
 
   return (

@@ -171,15 +171,19 @@ The dark mode inverts the architecture: Paper becomes near-black (`oklch(0.145 0
 
 ## 4. Elevation
 
-QR Studio is flat by default. Depth is conveyed through thin solid ring borders (`ring-1 ring-foreground/10`) and tonal background shifts (`bg-muted`, `bg-secondary`, `bg-card`), never through box-shadows.
+QR Studio is flat by default. Surface-level containers (cards, sidebars, page panels) use thin solid ring borders (`ring-1 ring-foreground/10`) and tonal background shifts (`bg-muted`, `bg-secondary`, `bg-card`) for depth — no shadows. The `ring` approach creates a crisp, precise separation that matches the workshop metaphor: tools are organised on a pegboard, not floating in space.
 
-There is no shadow vocabulary. Cards, dialogs, and menus sit on the same visual plane as the background — distinguished only by colour and border. The `ring` approach creates a crisp, precise separation that matches the workshop metaphor: tools are organised on a pegboard, not floating in space.
+**Overlay exceptions.** Floating elements that sit above the page (dropdowns, select popups, sheets, toasts) use a measured shadow vocabulary to establish depth against the backdrop. These are the only surfaces that cast shadows — they are temporary overlays, not permanent fixtures.
 
-**In dark mode**, rings use `oklch(1 0 0 / 10%)` — white at 10% opacity — which reads as a subtle glow on the dark surface.
+- **`shadow-md`** (`box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1)`): Dropdown menus, select popups. Medium-depth overlays with a clear anchor point.
+- **`shadow-lg`** (`box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1)`): Sheets (slide-in panels). Deep overlays that cover most of the viewport edge.
+- **`shadow-sm`** (`box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05)`): Tab active indicators (the raised tab in the default variant).
+
+**In dark mode**, rings use `oklch(1 0 0 / 10%)` — white at 10% opacity — which reads as a subtle glow on the dark surface. Shadows remain but are partially absorbed by the dark backdrop; the ring becomes the more visible depth cue.
 
 ### Named Rules
 
-**The Flat-By-Default Rule.** No shadows at rest. No shadows on hover. No shadows on cards, menus, or dialogs. If an element needs visual separation, use a ring or a background shift. Shadows belong to design systems that have something to say about depth; this one doesn't.
+**The Flat-By-Default Rule.** No shadows on surface-level containers. Cards, sidebars, page panels, and dialogs never cast shadows. Overlay elements (dropdowns, select popups, sheets, toasts) are the only exceptions — their temporariness earns the shadow.
 
 ## 5. Components
 
@@ -233,12 +237,141 @@ Vertical sidebar nav on desktop, sheet drawer on mobile.
 
 ### Dialog / Modal
 
-Standard overlay with backdrop and focus trap.
+Standard overlay with backdrop and focus trap. Based on `@base-ui/react/dialog`.
 
-- **Backdrop:** `bg-black/50` — black at 50%, no blur. The backdrop is a simple dim.
-- **Content Panel:** Card styling (ring border, `bg-card`, rounded xl) centred in the viewport.
-- **Close Button:** Ghost icon button in the top-right corner.
-- **Animation:** Standard fade+scale on open/close via `tw-animate-css`.
+- **Backdrop:** `bg-black/10` — black at 10%, with optional `backdrop-blur-xs` on supported browsers. A light tint, not a heavy dim.
+- **Content Panel:** Popover background (`bg-popover`) with ring border (`ring-1 ring-foreground/10`), rounded `xl` (0.75rem). Centred in the viewport with `max-w-sm` (384px).
+- **Close Button:** Ghost icon button (`size="icon-sm"`) in the top-right corner, using `XIcon`.
+- **Header:** `flex flex-col gap-2`. Title uses `font-heading text-base font-medium`, description uses `text-sm text-muted-foreground`.
+- **Footer:** `border-t bg-muted/50` tinted bar, `-mx-4 -mb-4` for edge-to-edge coverage. Button group right-aligned on `sm+`.
+- **Animation:** Fade-in + zoom-in (95%) on open via `tw-animate-css` at 100ms duration. Symmetric on close.
+
+### Alert Dialog
+
+Focused confirmation dialog for destructive or critical actions. Shares the same backdrop and ring-border pattern as Dialog, with a centred icon/heading layout.
+
+- **Structure:** Title + optional media icon + description + action/cancel button pair. Composed from `@base-ui/react/alert-dialog`.
+- **Backdrop:** Identical to Dialog — `bg-black/10`, `backdrop-blur-xs` on supported browsers.
+- **Content Panel:** Same Popover styling as Dialog. Default size `max-w-xs` (320px), expanding to `sm:max-w-sm` on larger screens. Compact `sm` size variant available.
+- **Header:** Centred on mobile, left-aligned on `sm+`. The optional media icon (destructive icon, warning icon) sits above the title in a `size-10 bg-muted` rounded container.
+- **Footer:** Tinted bar identical to Dialog footer. Button pair (Cancel + Confirm) stacked on mobile, inline on `sm+`. Confirm action uses `Button` directly — can accept any button variant, including `destructive`.
+- **Animation:** Same fade+zoom as Dialog, 100ms.
+
+### Sheet
+
+Slide-in panel for secondary content — used as the mobile sidebar drawer and for detail panels.
+
+- **Backdrop:** `bg-black/10`, fading in/out at 150ms.
+- **Content Panel:** Popover background with ring border. 4 sides supported (top, right, bottom, left). Default width `w-3/4`, capped at `sm:max-w-sm`. Slides in from the chosen edge with a 2.5rem (40px) translate offset — visible travel without excessive distance.
+- **Close Button:** Ghost icon button in the top-right corner (top-3 right-3).
+- **Header/Footer:** Shorthand layout components with `p-4`.
+- **Sidebar mobile variant:** `w-64`, left-anchored, no close button (native Sheet dismiss). Used at `lg:hidden` alongside the desktop fixed sidebar.
+- **Animation:** 200ms ease-in-out slide + fade. Reduced motion suppresses all transform.
+
+### Dropdown Menu
+
+Contextual action menu triggered by buttons, avatars, or right-click. Based on `@base-ui/react/menu`.
+
+- **Trigger:** Any interactive element. Typically a ghost button or avatar wrapper.
+- **Content Panel:** Popover background with ring border (`ring-1 ring-foreground/10`) and `shadow-md`. Rounded `lg` (0.625rem). Sized to anchor width, minimum 8rem. Controlled via `PopoverPositioner` with configurable side/align.
+- **Items:** `rounded-md` padding `px-1.5 py-1`, `text-sm`. Default: `focus:bg-accent focus:text-accent-foreground`. Destructive variant: `text-destructive`, red tint on focus. Checkbox and radio item types include a right-aligned check indicator.
+- **Label:** `text-xs font-medium text-muted-foreground`, `px-1.5 py-1`.
+- **Separator:** `h-px bg-border`, `-mx-1 my-1`.
+- **Shortcut:** Right-aligned `text-xs tracking-widest text-muted-foreground`.
+- **Submenu:** Nested flyout, same styling as parent. Chevron right indicator on the submenu trigger.
+- **Animation:** Fade-in + zoom-in (95%) at 100ms, with `slide-in-from-top-2` for bottom-anchored menus. Symmetric on close.
+
+### Select
+
+Native-behaving dropdown for choosing from a list of options. Based on `@base-ui/react/select`.
+
+- **Trigger:** `h-8` compact button matching input height. Border, background, focus treatment identical to the Input component. Chevron down icon on the right (`text-muted-foreground`).
+- **Content Popup:** Popover background with ring border and `shadow-md`. Rounded `lg`. Sized to anchor width, minimum 9rem. Uses `PopoverPositioner` with configurable side/align.
+- **Items:** Same treatment as Dropdown Menu items — `rounded-md`, `px-1.5 py-1`, `text-sm`. Selected item shows a check icon (`CheckIcon`) on the right.
+- **Label/Group:** Optional `SelectGroup` with `SelectLabel` (`text-xs text-muted-foreground`). Separator between groups.
+- **Scroll buttons:** Chevron up/down arrows when content overflows.
+- **Animation:** Fade-in + zoom-in (95%) at 100ms.
+
+### Tabs
+
+Horizontal (default) or vertical tab navigation for switching between content panels. Based on `@base-ui/react/tabs`.
+
+- **List Container (default variant):** Muted background (`bg-muted`), rounded `lg` (0.625rem), inline-flex, `h-8`. 3px padding around items.
+- **Tab Trigger:** Compact (`h-[calc(100%-1px)]`), `px-1.5 py-0.5`, `text-sm font-medium`. Default: `text-foreground/60`. Active: `bg-background text-foreground` with subtle `shadow-sm`. Hover: `text-foreground`. Focus ring on keyboard navigation.
+- **Line Variant:** Transparent background. Active state indicated by a 2px underline bar (`.after:bg-foreground`) positioned below the tab. No background or shadow on the active tab.
+- **Content Panel:** `text-sm`, flex-1, outline-none. Spacing between list and panel is handled by the parent layout (8px gap in `group/tabs`).
+- **Vertical orientation:** `flex-col` list, items full-width. Active indicator shifts to the right edge.
+
+### Table
+
+Standard data table with row hover and selection states. Semantic `<table>` wrapped in a horizontal scroll container.
+
+- **Wrapper:** `relative w-full overflow-auto` — horizontal scroll on overflow, no container break.
+- **Rows:** `border-b` between rows. `hover:bg-muted/50` row highlight. `data-[state=selected]:bg-muted` for checked/selected rows.
+- **Header:** `h-10`, `px-2`, `text-left`, `font-medium text-muted-foreground`. Bottom border via `[&_tr]:border-b`.
+- **Cells:** `p-2`, `align-middle`. Compact padding for dense data layouts.
+- **Typography:** `text-sm` throughout. Table inherits the Body role (14px).
+
+### Avatar
+
+User and entity avatars with image, fallback initials, badge, and group stacking. Based on `@base-ui/react/avatar`.
+
+- **Shape:** Circular (`rounded-full`), `size-8` by default. Size variants: `sm` (size-6), `lg` (size-10).
+- **Fallback:** `bg-muted text-muted-foreground text-sm`. Initials extracted from the user's name (uppercase, 2 characters max).
+- **Border:** `after:border after:border-border` pseudo-element — a subtle ring overlay that adapts to dark mode via `mix-blend-mode`.
+- **Badge:** Small coloured dot at bottom-right (`size-2.5`), `bg-primary text-primary-foreground`, with `ring-2 ring-background` separation. Scales with avatar size.
+- **Group:** `flex -space-x-2` overlapping stack. Each avatar receives `ring-2 ring-background` to separate visually.
+
+### Separator
+
+Thin visual divider for grouping content sections. Based on `@base-ui/react/separator`.
+
+- **Horizontal:** `h-px w-full bg-border`. Used between sidebar sections and within card headers.
+- **Vertical:** `w-px self-stretch bg-border`. Used in toolbars and inline actions.
+- **No margins** — spacing is owned by the parent layout.
+
+### Progress
+
+Linear progress indicator for loading states, quotas, and usage meters.
+
+- **Track:** `h-2 w-full rounded-full bg-muted`.
+- **Fill:** `rounded-full bg-primary`, width transitioned via inline `style` (animating `width` is the single approved layout-property animation — the transition is imperceptible and essential for accuracy).
+- **Accessibility:** `role="progressbar"` with `aria-valuenow`, `aria-valuemin`, `aria-valuemax`.
+
+### Toast / Sonner
+
+Transient notification system using the `sonner` library, themed to match the design system tokens.
+
+- **Styling:** Toast background = `--popover`, text = `--popover-foreground`, border = `--border`. Rounded corners inherit `--radius`. Tokens are passed as CSS custom properties to the Sonner container.
+- **Icons:** Inlined Lucide icons per type — `CircleCheckIcon` (success), `InfoIcon` (info), `TriangleAlertIcon` (warning), `OctagonXIcon` (error), `Loader2Icon` (loading with spin animation).
+- **Theme:** Adapts to light/dark/system via `next-themes`.
+
+### Skeleton / Loading
+
+Placeholder shimmer for content that hasn't loaded yet.
+
+- **Style:** `animate-pulse rounded-md bg-muted`. Uses the CSS `pulse` animation (opacity fade, 2s infinite).
+- **Usage:** Sized via className to match the expected content dimensions. Composes into structured loading states (table skeleton, card skeleton, etc.).
+- **No spinner.** Loading is communicated through skeleton shapes that mirror the final layout — users scan structure, not spinners.
+
+### Empty State
+
+Instructional blank-slate component shown when a list or view has no data. Teach, don't just say "nothing here."
+
+- **Layout:** Centred column, `py-16`, `text-center`.
+- **Icon:** `size-16` circular muted container, `size-8` icon in `text-muted-foreground`. Defaults to `InboxIcon`.
+- **Title:** `text-base font-medium text-foreground`.
+- **Description:** `text-sm text-muted-foreground`, `max-w-sm` — one to two sentences about what to do.
+- **Action:** Optional CTA button (default variant, size sm) — either a `Link` (href-based) or `Button` (onClick-based). Matches the primary button style.
+
+### Page Header
+
+Consistent top-of-page title bar for authenticated surfaces.
+
+- **Layout:** `flex flex-wrap items-start justify-between gap-4`. Title and actions on opposite sides, wrapping on narrow viewports.
+- **Title:** `text-2xl font-bold tracking-tight text-foreground` — the display role at fixed 2xl (32px), not fluid. Product register fixity applies.
+- **Description:** `text-sm text-muted-foreground` — optional subtitle below the title.
+- **Actions:** `flex items-center gap-2` — toolbar of buttons, dropdowns, or filters aligned to the right.
 
 ### Chips / Badges
 
@@ -259,6 +392,9 @@ Small metadata indicators used for plan tier, QR status, and tags.
 - **Do** keep danger colour to ≤2% of any screen. Its rarity makes it discoverable.
 - **Do** prefer dense information layouts. 14px body text, 8px grid, compact buttons. Trust the user to parse information quickly.
 - **Do** use `text-wrap: balance` on headings and `text-wrap: pretty` on body paragraphs.
+- **Do** use skeleton placeholders for loading states — let users scan the structure before data arrives.
+- **Do** use the Empty State pattern to teach the interface when a list is empty. Never just "nothing here."
+- **Do** use `shadow-md` / `shadow-lg` on floating overlays (dropdowns, select popups, sheets) — the Flat-By-Default rule applies to surface-level containers, not temporary overlays.
 
 ### Don't:
 
