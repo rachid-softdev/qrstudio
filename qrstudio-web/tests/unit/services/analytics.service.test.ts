@@ -38,7 +38,7 @@ vi.mock("@/server/cache/analytics-cache", () => ({
   DASHBOARD_TTL: 30,
 }))
 
-import { analyticsService } from "@/server/services/analytics.service"
+import { analyticsService, scanRecorder, analyticsExportService } from "@/server/services/analytics.service"
 
 describe("analyticsService", () => {
   beforeEach(() => {
@@ -58,7 +58,7 @@ describe("analyticsService", () => {
       prismaMock.qRCode.update.mockResolvedValue({} as never)
       prismaMock.scan.findFirst.mockResolvedValue(null)
 
-      await analyticsService.recordScan(scanInput)
+      await scanRecorder.recordScan(scanInput)
 
       expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
       expect(typeof (prismaMock.$transaction.mock.calls[0] as [{ fn: unknown }])[0]).toBe("function")
@@ -69,7 +69,7 @@ describe("analyticsService", () => {
       prismaMock.qRCode.update.mockResolvedValue({} as never)
       prismaMock.scan.findFirst.mockResolvedValue(null)
 
-      await analyticsService.recordScan(scanInput)
+      await scanRecorder.recordScan(scanInput)
 
       expect(prismaMock.scan.create).toHaveBeenCalledTimes(1)
       const createData = (prismaMock.scan.create.mock.calls[0] as [{ data: Record<string, unknown> }])[0].data
@@ -90,7 +90,7 @@ describe("analyticsService", () => {
       prismaMock.qRCode.update.mockResolvedValue({} as never)
       prismaMock.scan.findFirst.mockResolvedValue({ id: "recent-scan" } as never)
 
-      await analyticsService.recordScan(scanInput)
+      await scanRecorder.recordScan(scanInput)
 
       // Only 1 update (totalScans), no uniqueScans increment
       expect(prismaMock.qRCode.update).toHaveBeenCalledTimes(1)
@@ -100,7 +100,7 @@ describe("analyticsService", () => {
       prismaMock.scan.create.mockResolvedValue({ id: "scan-3" } as never)
       prismaMock.qRCode.update.mockResolvedValue({} as never)
 
-      await analyticsService.recordScan({
+      await scanRecorder.recordScan({
         qrCodeId: "qr-1",
         userAgent: "Mozilla/5.0",
       })
@@ -270,7 +270,7 @@ describe("analyticsService", () => {
         { scannedAt: new Date("2024-01-16T14:00:00Z"), ipHash: "def456", country: "Germany", city: null, deviceType: "desktop", os: "Windows", browser: "Chrome", referer: null },
       ] as never)
 
-      const csv = await analyticsService.exportCSV("qr-1", "30d")
+      const csv = await analyticsExportService.exportCSV("qr-1", "30d")
 
       const lines = csv.split("\n")
       expect(lines[0]).toBe("Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent")
@@ -285,7 +285,7 @@ describe("analyticsService", () => {
     it("should export CSV with only header when no scans", async () => {
       prismaMock.scan.findMany.mockResolvedValue([] as never)
 
-      const csv = await analyticsService.exportCSV("qr-empty", "7d")
+      const csv = await analyticsExportService.exportCSV("qr-empty", "7d")
       expect(csv).toBe("Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent")
     })
   })
@@ -297,7 +297,7 @@ describe("analyticsService", () => {
         { scannedAt: new Date("2024-01-16T14:00:00Z"), ipHash: "def456", country: "Germany", city: null, deviceType: "desktop", os: "Windows", browser: "Chrome", referer: null },
       ] as never)
 
-      const result = await analyticsService.exportCSVPage("qr-1", "30d")
+      const result = await analyticsExportService.exportCSVPage("qr-1", "30d")
 
       expect(result.rows).toHaveLength(3) // header + 2 data rows
       expect(result.rows[0]).toBe("Date,IP Hash,Pays,Ville,Appareil,OS,Navigateur,Référent")
@@ -316,7 +316,7 @@ describe("analyticsService", () => {
       }))
       prismaMock.scan.findMany.mockResolvedValue(scans as never)
 
-      const result = await analyticsService.exportCSVPage("qr-1", "30d")
+      const result = await analyticsExportService.exportCSVPage("qr-1", "30d")
 
       expect(result.rows).toHaveLength(1001) // header + 1000 data rows
       expect(result.nextCursor).toBe("scan-999")
@@ -327,7 +327,7 @@ describe("analyticsService", () => {
         { scannedAt: new Date("2024-01-16T14:00:00Z"), ipHash: "def456", country: "Germany", city: null, deviceType: "desktop", os: "Windows", browser: "Chrome", referer: null },
       ] as never)
 
-      const result = await analyticsService.exportCSVPage("qr-1", "30d", "scan-999")
+      const result = await analyticsExportService.exportCSVPage("qr-1", "30d", "scan-999")
 
       expect(result.rows).toHaveLength(1) // no header, just data
       expect(result.rows[0]).toContain("Germany")
@@ -337,7 +337,7 @@ describe("analyticsService", () => {
     it("should return header-only when no scans on first page", async () => {
       prismaMock.scan.findMany.mockResolvedValue([] as never)
 
-      const result = await analyticsService.exportCSVPage("qr-empty", "7d")
+      const result = await analyticsExportService.exportCSVPage("qr-empty", "7d")
 
       // First page always includes header even with no data
       expect(result.rows).toHaveLength(1)
@@ -348,7 +348,7 @@ describe("analyticsService", () => {
     it("should pass cursor and skip:1 to findMany on subsequent pages", async () => {
       prismaMock.scan.findMany.mockResolvedValue([] as never)
 
-      await analyticsService.exportCSVPage("qr-1", "30d", "scan-cursor-1")
+      await analyticsExportService.exportCSVPage("qr-1", "30d", "scan-cursor-1")
 
       expect(prismaMock.scan.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

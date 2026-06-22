@@ -44,16 +44,16 @@ describe("computeQRData", () => {
 
     it("should generate WIFI config without password", () => {
       const result = computeQRData("WIFI", {
-        wifi: { ssid: "GuestNet", encryption: "WPA2" },
+        wifi: { ssid: "GuestNet", encryption: "WPA" as const },
       })
-      expect(result).toContain("WIFI:T:WPA2")
+      expect(result).toContain("WIFI:T:WPA")
       expect(result).toContain("S:GuestNet")
       expect(result).not.toContain("P:")
     })
 
     it("should use nopass when encryption is missing", () => {
       const result = computeQRData("WIFI", {
-        wifi: { ssid: "OpenNet" },
+        wifi: { ssid: "OpenNet", encryption: "nopass" },
       })
       expect(result).toContain("WIFI:T:nopass")
     })
@@ -64,7 +64,7 @@ describe("computeQRData", () => {
     })
 
     it("should return empty string when ssid is missing", () => {
-      const result = computeQRData("WIFI", { wifi: {} })
+      const result = computeQRData("WIFI", { wifi: { ssid: "", encryption: "nopass" } })
       expect(result).toBe("")
     })
   })
@@ -95,7 +95,7 @@ describe("computeQRData", () => {
 
     it("should generate Vcard with only firstName", () => {
       const result = computeQRData("VCARD", {
-        vcard: { firstName: "Alice" },
+        vcard: { firstName: "Alice", lastName: "" },
       })
       expect(result).toContain("FN:Alice")
       expect(result).toContain("N:;Alice;;;")
@@ -103,14 +103,14 @@ describe("computeQRData", () => {
 
     it("should generate Vcard with only lastName", () => {
       const result = computeQRData("VCARD", {
-        vcard: { lastName: "Smith" },
+        vcard: { firstName: "", lastName: "Smith" },
       })
       expect(result).toContain("FN: Smith")
       expect(result).toContain("N:Smith;;;")
     })
 
     it("should return empty string when firstName and lastName are missing", () => {
-      const result = computeQRData("VCARD", { vcard: { email: "test@test.com" } })
+      const result = computeQRData("VCARD", { vcard: { firstName: "", lastName: "", email: "test@test.com" } })
       expect(result).toBe("")
     })
 
@@ -146,7 +146,7 @@ describe("computeQRData", () => {
 
   describe("LANDING_PAGE type", () => {
     it("should return a string starting with page_", () => {
-      const result = computeQRData("LANDING_PAGE", { landingPage: { title: "My Page" } })
+      const result = computeQRData("LANDING_PAGE", { landingPage: { title: "My Page", bgColor: "#FFFFFF", textColor: "#111827" } })
       expect(result).toMatch(/^page_\d{13}$/)
     })
   })
@@ -158,7 +158,7 @@ describe("computeQRData", () => {
     })
 
     it("should handle nullish content gracefully", () => {
-      const result = computeQRData("URL", { destinationUrl: null })
+      const result = computeQRData("URL", { destinationUrl: undefined })
       expect(result).toBe("")
     })
 

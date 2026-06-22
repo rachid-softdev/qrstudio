@@ -146,10 +146,17 @@ export const billingService = {
       })
     }
 
+    if (!user.stripeSubscriptionId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Aucun abonnement actif à annuler",
+      })
+    }
+
     try {
       await withBreaker(stripeBreaker, () =>
         withRetry(() =>
-          getStripeClient().subscriptions.update(user.stripeSubscriptionId, {
+          getStripeClient().subscriptions.update(user.stripeSubscriptionId!, {
             cancel_at_period_end: true,
           }),
           { maxRetries: 3, baseDelay: 500 },

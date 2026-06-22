@@ -179,7 +179,7 @@ async function navigateAndMeasure(page: Page, url: string): Promise<PageTiming> 
     const nav = entries[0] as PerformanceNavigationTiming
     return {
       ttfb: nav.responseStart - nav.requestStart,
-      domContentLoaded: nav.domContentLoadedEnd - nav.domContentLoadedStart,
+      domContentLoaded: nav.domContentLoadedEventEnd - nav.domContentLoadedEventStart,
       domInteractive: nav.domInteractive,
       responseEnd: nav.responseEnd,
       transferSize: nav.transferSize,
@@ -216,7 +216,29 @@ async function navigateAndMeasure(page: Page, url: string): Promise<PageTiming> 
   })
 
   // Collect Chrome DevTools Protocol metrics
-  const metrics = await page.metrics()
+  let jsHeapUsedSize = 0
+  let jsHeapTotalSize = 0
+  let domNodes = 0
+  let scriptDuration = 0
+  let layoutDuration = 0
+  let taskDuration = 0
+  try {
+    const cdpSession = await page.context().newCDPSession(page)
+    const cdpMetrics = await cdpSession.send('Performance.getMetrics')
+    for (const metric of cdpMetrics.metrics) {
+      switch (metric.name) {
+        case 'JSHeapUsedSize': jsHeapUsedSize = metric.value; break
+        case 'JSHeapTotalSize': jsHeapTotalSize = metric.value; break
+        case 'Nodes': domNodes = metric.value; break
+        case 'ScriptDuration': scriptDuration = metric.value * 1000; break
+        case 'LayoutDuration': layoutDuration = metric.value * 1000; break
+        case 'TaskDuration': taskDuration = metric.value * 1000; break
+      }
+    }
+    await cdpSession.detach()
+  } catch {
+    // CDP metrics not available (non-Chrome browser or permissions)
+  }
 
   return {
     totalDuration,
@@ -225,12 +247,12 @@ async function navigateAndMeasure(page: Page, url: string): Promise<PageTiming> 
     domInteractive: navTiming?.domInteractive ?? 0,
     responseEnd: navTiming?.responseEnd ?? 0,
     fcp: paintTiming.fcp,
-    jsHeapUsedSize: metrics.JSHeapUsedSize ?? 0,
-    jsHeapTotalSize: metrics.JSHeapTotalSize ?? 0,
-    domNodes: metrics.Nodes ?? 0,
-    scriptDuration: (metrics.ScriptDuration ?? 0) * 1000, // seconds → ms
-    layoutDuration: (metrics.LayoutDuration ?? 0) * 1000,
-    taskDuration: (metrics.TaskDuration ?? 0) * 1000,
+    jsHeapUsedSize,
+    jsHeapTotalSize,
+    domNodes,
+    scriptDuration,
+    layoutDuration,
+    taskDuration,
     resourceCount: resourceMetrics.count,
     totalTransferSize: resourceMetrics.totalSize,
     jsTransferSize: resourceMetrics.jsSize,
@@ -549,8 +571,8 @@ test.describe("3. QR Detail Page Performance", () => {
 
     // Wait for the Analytics section to appear
     await expect(
-      page.locator("text=Analytics, text=Analytiques, text=Évolution des scans"),
-    ).first().toBeVisible({ timeout: 15000 })
+      page.locator("text=Analytics, text=Analytiques, text=Évolution des scans").first(),
+    ).toBeVisible({ timeout: 15000 })
 
     const analyticsRenderTime = Date.now() - startTime
 
@@ -760,7 +782,17 @@ test.describe("6. Memory & CPU", () => {
     // Collect long tasks
     const longTasks = await collectLongTasks(page)
 
-    const totalTaskDuration = (await page.metrics()).TaskDuration ?? 0
+    let taskDurationValue = 0
+    try {
+      const cdpSession = await page.context().newCDPSession(page)
+      const cdpMetrics = await cdpSession.send('Performance.getMetrics')
+      const taskMetric = cdpMetrics.metrics.find((m: { name: string }) => m.name === 'TaskDuration')
+      if (taskMetric) taskDurationValue = taskMetric.value
+      await cdpSession.detach()
+    } catch {
+      // CDP metrics not available
+    }
+    const totalTaskDuration = taskDurationValue
 
     console.log(`  /dashboard — Long tasks >50ms: ${longTasks.length}, Total task duration: ${(totalTaskDuration * 1000).toFixed(0)}ms`)
     if (longTasks.length > 0) {

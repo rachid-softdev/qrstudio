@@ -71,29 +71,29 @@ export const authRouter = router({
   updateProfile: protectedProcedure
     .input(updateProfileSchema)
     .mutation(async ({ ctx, input }) => {
-      return authService.updateProfile(ctx.user.id, input)
+      return authService.updateProfile(ctx.user!.id, input)
     }),
 
   changePassword: protectedProcedure
     .input(changePasswordSchema)
     .mutation(async ({ ctx, input }) => {
-      return authService.changePassword(ctx.user.id, input.currentPassword, input.newPassword)
+      return authService.changePassword(ctx.user!.id, input.currentPassword, input.newPassword)
     }),
 
   deleteAccount: protectedProcedure.mutation(async ({ ctx }) => {
-    return authService.deleteAccount(ctx.user.id)
+    return authService.deleteAccount(ctx.user!.id)
   }),
 
   // ─── TOTP ──────────────────────────────────────────────────────────────────
 
   generateTotpSetup: protectedProcedure.query(async ({ ctx }) => {
-    return authService.generateTotpSetup(ctx.user.id)
+    return authService.generateTotpSetup(ctx.user!.id)
   }),
 
   verifyAndEnableTotp: protectedProcedure
     .input(verifyTotpSchema)
     .mutation(async ({ ctx, input }) => {
-      return authService.verifyAndEnableTotp(ctx.user.id, input.token)
+      return authService.verifyAndEnableTotp(ctx.user!.id, input.token)
     }),
 
   verifyTotpChallenge: publicProcedure
@@ -113,7 +113,7 @@ export const authRouter = router({
   disableTotp: protectedProcedure
     .input(disableTotpSchema)
     .mutation(async ({ ctx, input }) => {
-      return authService.disableTotp(ctx.user.id, input.password)
+      return authService.disableTotp(ctx.user!.id, input.password)
     }),
 
   // ─── Password Reset ─────────────────────────────────────────────────────────

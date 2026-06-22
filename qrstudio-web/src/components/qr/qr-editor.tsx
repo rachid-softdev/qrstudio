@@ -44,7 +44,7 @@ export function QREditor({ qrCode }: QREditorProps) {
         ? { wifi: (meta?.wifi as QRCreateInput["wifi"]) ?? { ssid: "", encryption: "nopass" as const } }
         : {}),
       ...(qrCode.type === "VCARD"
-        ? { vcard: (meta?.vcard as QRCreateInput["vcard"]) ?? {} }
+        ? { vcard: (meta?.vcard as QRCreateInput["vcard"]) ?? {} as QRCreateInput["vcard"] }
         : {}),
       ...(qrCode.type === "TEXT"
         ? { textContent: (meta?.textContent as string | undefined) ?? "" }
@@ -66,17 +66,17 @@ export function QREditor({ qrCode }: QREditorProps) {
   async function handleSave() {
     setSaving(true)
     try {
-      const payload: Parameters<typeof updateMutation.mutateAsync>[0] = {
+      const payload = {
         id: qrCode.id,
         name: qrCode.name,
         ...content,
         fgColor: design.fgColor,
         bgColor: design.bgColor,
         moduleShape: design.moduleShape,
-        frameType: design.frameType ?? undefined,
+        frameType: (design.frameType ?? undefined) as QRCreateInput["frameType"],
         frameLabel: design.frameLabel || undefined,
         logoUrl: design.logoUrl ?? undefined,
-      }
+      } as Parameters<typeof updateMutation.mutateAsync>[0]
 
       await updateMutation.mutateAsync(payload)
       toast.success("QR code mis à jour")

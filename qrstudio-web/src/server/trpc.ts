@@ -91,7 +91,7 @@ const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
   return next({
     ctx: {
       ...ctx,
-      user: ctx.user,
+      user: ctx.user!,
     },
   })
 })
@@ -193,7 +193,8 @@ export function requireRole(role: string, requiredRoles: string[]): void {
 // Throws FORBIDDEN if the user is not a member of the workspace
 // or if their role is not in `allowedRoles`.
 export function requireWorkspaceRole(allowedRoles: string[]) {
-  return t.middleware(async ({ ctx, next, rawInput }) => {
+  return t.middleware(async ({ ctx, next, getRawInput }) => {
+    const rawInput = await getRawInput()
     const input = rawInput as Record<string, unknown> | null
     const workspaceId = typeof input?.workspaceId === "string" ? input.workspaceId : undefined
     if (!workspaceId) {

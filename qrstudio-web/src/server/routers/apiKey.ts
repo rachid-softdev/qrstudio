@@ -19,20 +19,22 @@ async function ensurePlanIsProOrAbove(userId: string) {
 
 export const apiKeyRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    await ensurePlanIsProOrAbove(ctx.user.id)
-    return apiKeyService.list(ctx.user.id)
+    const userId = ctx.user!.id
+    await ensurePlanIsProOrAbove(userId)
+    return apiKeyService.list(userId)
   }),
 
   generate: protectedProcedure
     .input(z.object({ name: z.string().min(1, "Le nom est requis").max(50) }))
     .mutation(async ({ ctx, input }) => {
-      await ensurePlanIsProOrAbove(ctx.user.id)
-      return apiKeyService.generate(ctx.user.id, input.name)
+      const userId = ctx.user!.id
+      await ensurePlanIsProOrAbove(userId)
+      return apiKeyService.generate(userId, input.name)
     }),
 
   revoke: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return apiKeyService.revoke(input.id, ctx.user.id)
+      return apiKeyService.revoke(input.id, ctx.user!.id)
     }),
 })
