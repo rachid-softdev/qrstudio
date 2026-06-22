@@ -152,7 +152,7 @@ test.describe("XSS / Injection Attempts", () => {
     // Check if the invite form is visible (owner only)
     const inviteForm = page.getByText("Inviter un membre")
     if (!(await inviteForm.isVisible().catch(() => false))) {
-      test.skip("Invite form not visible — user may not be owner")
+      test.skip(true, "Invite form not visible — user may not be owner")
       return
     }
 
@@ -527,8 +527,9 @@ test.describe("Session Security", () => {
       // If it has an expiry, it's a persistent cookie
       if (authCookie.expires) {
         // Max 30 days for persistent cookies — just log the value
+        // Cookie.expires is a Unix timestamp in seconds
         const daysUntilExpiry =
-          (authCookie.expires.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+          (authCookie.expires * 1000 - Date.now()) / (1000 * 60 * 60 * 24)
         // If expiry is more than 30 days out, it might be unexpected
         expect(daysUntilExpiry).toBeLessThan(365)
       }
@@ -564,7 +565,7 @@ test.describe("CSRF / Request Forgery", () => {
     // via the session object, which may or may not be serialized on the page
     if (!hasCsrfTokenInPage && !csrfCookie) {
       // Skip gracefully — the token may only be available in API calls
-      test.skip("CSRF token not found in page or cookies — likely only in JWT")
+      test.skip(true, "CSRF token not found in page or cookies — likely only in JWT")
     } else {
       expect(hasCsrfTokenInPage || !!csrfCookie).toBeTruthy()
     }
@@ -665,7 +666,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
       // We'll test the disable flow instead
       await page.waitForLoadState("networkidle")
       if (await is2faEnabled(page)) {
-        test.skip("2FA already enabled — cannot test enable flow verification")
+        test.skip(true, "2FA already enabled — cannot test enable flow verification")
         return
       }
     }
@@ -684,7 +685,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
     await page.waitForTimeout(1000)
     const verifyInput = page.locator("#verify-totp-code")
     if (!(await verifyInput.isVisible().catch(() => false))) {
-      test.skip("Cannot reach TOTP verification step")
+      test.skip(true, "Cannot reach TOTP verification step")
       return
     }
 
@@ -700,7 +701,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
   test("TOTP-SEC-02: Empty TOTP code is rejected", async ({ page }) => {
     const activator = page.getByRole("button", { name: "Activer" })
     if (!(await activator.isVisible().catch(() => false))) {
-      test.skip("2FA already enabled")
+      test.skip(true, "2FA already enabled")
       return
     }
 
@@ -716,7 +717,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
     await page.waitForTimeout(1000)
     const verifyInput = page.locator("#verify-totp-code")
     if (!(await verifyInput.isVisible().catch(() => false))) {
-      test.skip("Cannot reach TOTP verification step")
+      test.skip(true, "Cannot reach TOTP verification step")
       return
     }
 
@@ -731,7 +732,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
   test("TOTP-SEC-03: Non-numeric TOTP code characters are stripped or rejected", async ({ page }) => {
     const activator = page.getByRole("button", { name: "Activer" })
     if (!(await activator.isVisible().catch(() => false))) {
-      test.skip("2FA already enabled")
+      test.skip(true, "2FA already enabled")
       return
     }
 
@@ -747,7 +748,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
     await page.waitForTimeout(1000)
     const verifyInput = page.locator("#verify-totp-code")
     if (!(await verifyInput.isVisible().catch(() => false))) {
-      test.skip("Cannot reach TOTP verification step")
+      test.skip(true, "Cannot reach TOTP verification step")
       return
     }
 
@@ -769,7 +770,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
   test("TOTP-SEC-04: Wrong 6-digit TOTP code shows 'Code invalide' error", async ({ page }) => {
     const activator = page.getByRole("button", { name: "Activer" })
     if (!(await activator.isVisible().catch(() => false))) {
-      test.skip("2FA already enabled")
+      test.skip(true, "2FA already enabled")
       return
     }
 
@@ -785,7 +786,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
     await page.waitForTimeout(1000)
     const verifyInput = page.locator("#verify-totp-code")
     if (!(await verifyInput.isVisible().catch(() => false))) {
-      test.skip("Cannot reach TOTP verification step")
+      test.skip(true, "Cannot reach TOTP verification step")
       return
     }
 
@@ -812,7 +813,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
     await page.waitForLoadState("networkidle")
 
     if (!(await is2faEnabled(page))) {
-      test.skip("2FA not enabled — cannot test totp challenge rate limiting")
+      test.skip(true, "2FA not enabled — cannot test totp challenge rate limiting")
       return
     }
 
@@ -830,13 +831,13 @@ test.describe("2FA / TOTP Edge Cases", () => {
 
     const currentUrl = page.url()
     if (!currentUrl.includes("/auth/totp")) {
-      test.skip("TOTP challenge page not reached — 2FA may not be configured for this account")
+      test.skip(true, "TOTP challenge page not reached — 2FA may not be configured for this account")
       return
     }
 
     const totpInput = page.locator("#totp-code")
     if (!(await totpInput.isVisible().catch(() => false))) {
-      test.skip("TOTP input not visible")
+      test.skip(true, "TOTP input not visible")
       return
     }
 
@@ -864,7 +865,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
   // ❌ TOTP-SEC-06: Disable 2FA without password → rejected
   test("TOTP-SEC-06: Cannot disable 2FA without providing password", async ({ page }) => {
     if (!(await is2faEnabled(page))) {
-      test.skip("2FA already disabled — cannot test disable flow")
+      test.skip(true, "2FA already disabled — cannot test disable flow")
       return
     }
 
@@ -898,7 +899,7 @@ test.describe("2FA / TOTP Edge Cases", () => {
   // ❌ TOTP-SEC-07: Re-use backup code after it's been used → rejected
   test("TOTP-SEC-07: Used backup code cannot be reused", async ({ page }) => {
     if (!(await is2faEnabled(page))) {
-      test.skip("2FA not enabled — cannot test backup code reuse")
+      test.skip(true, "2FA not enabled — cannot test backup code reuse")
       return
     }
 
@@ -914,14 +915,14 @@ test.describe("2FA / TOTP Edge Cases", () => {
     await page.waitForTimeout(3000)
 
     if (!page.url().includes("/auth/totp")) {
-      test.skip("TOTP challenge page not reached")
+      test.skip(true, "TOTP challenge page not reached")
       return
     }
 
     // Click "Utiliser un code de secours" to switch to backup code mode
     const backupLink = page.getByText("Utiliser un code de secours")
     if (!(await backupLink.isVisible().catch(() => false))) {
-      test.skip("Backup code option not available")
+      test.skip(true, "Backup code option not available")
       return
     }
     await backupLink.click()
@@ -1135,7 +1136,7 @@ test.describe("API Key Security", () => {
   // ✅ API-SEC-01: Created API key shows full key once, then masked
   test("API-SEC-01: API key is shown once in full, then masked in list", async ({ page }) => {
     if (!(await hasApiAccess(page))) {
-      test.skip("API keys require PRO+ plan — demo account appears to be FREE")
+      test.skip(true, "API keys require PRO+ plan — demo account appears to be FREE")
       return
     }
 
@@ -1178,7 +1179,7 @@ test.describe("API Key Security", () => {
   // ❌ API-SEC-02: Revoked API key cannot be used for authentication
   test("API-SEC-02: Revoked API key is rejected", async ({ page }) => {
     if (!(await hasApiAccess(page))) {
-      test.skip("API keys require PRO+ plan")
+      test.skip(true, "API keys require PRO+ plan")
       return
     }
 
@@ -1235,7 +1236,7 @@ test.describe("API Key Security", () => {
   // ⚠️ API-SEC-03: API key value has proper format (prefix + random chars)
   test("API-SEC-03: API key has proper format with prefix", async ({ page }) => {
     if (!(await hasApiAccess(page))) {
-      test.skip("API keys require PRO+ plan")
+      test.skip(true, "API keys require PRO+ plan")
       return
     }
 
@@ -1280,7 +1281,7 @@ test.describe("API Key Security", () => {
 
     if (isVisible) {
       // If visible, the demo account is not FREE — skip this scenario
-      test.skip("Demo account has API key access — plan is PRO+")
+      test.skip(true, "Demo account has API key access — plan is PRO+")
       return
     }
 

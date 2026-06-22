@@ -91,7 +91,10 @@ describe("scanRecorder", () => {
       // Verify qRCode.update was called (totalScans increment)
       expect(prismaMock.qRCode.update).toHaveBeenCalled()
       const updateCall = prismaMock.qRCode.update.mock.calls.find(
-        (c: unknown[]) => (c as Record<string, unknown>[])[0]?.where?.id === "qr-1",
+        (c: unknown[]) => {
+          const arg = c[0] as { where?: { id?: string } }
+          return arg?.where?.id === "qr-1"
+        },
       )
       expect(updateCall).toBeTruthy()
     })
@@ -110,7 +113,10 @@ describe("scanRecorder", () => {
 
       // uniqueScans increment should be called
       const uniqueUpdate = prismaMock.qRCode.update.mock.calls.find(
-        (c: unknown[]) => (c as Record<string, unknown>[])[0]?.data?.uniqueScans !== undefined,
+        (c: unknown[]) => {
+          const arg = c[0] as { data?: { uniqueScans?: unknown } }
+          return arg?.data?.uniqueScans !== undefined
+        },
       )
       expect(uniqueUpdate).toBeTruthy()
     })
@@ -129,7 +135,10 @@ describe("scanRecorder", () => {
 
       // uniqueScans increment should NOT be called
       const uniqueUpdate = prismaMock.qRCode.update.mock.calls.find(
-        (c: unknown[]) => (c as Record<string, unknown>[])[0]?.data?.uniqueScans !== undefined,
+        (c: unknown[]) => {
+          const arg = c[0] as { data?: { uniqueScans?: unknown } }
+          return arg?.data?.uniqueScans !== undefined
+        },
       )
       expect(uniqueUpdate).toBeFalsy()
     })

@@ -4,7 +4,7 @@ import { billingService } from "@/server/services/billing.service"
 
 export const billingRouter = router({
   getSubscription: protectedProcedure.query(async ({ ctx }) => {
-    return billingService.getSubscription(ctx.user.id)
+    return billingService.getSubscription(ctx.user!.id)
   }),
 
   createCheckoutSession: protectedProcedure
@@ -16,10 +16,10 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return billingService.createCheckoutSession(ctx.user.id, input.plan, input.successUrl, input.cancelUrl)
+      return billingService.createCheckoutSession(ctx.user!.id, input.plan, input.successUrl, input.cancelUrl)
     }),
 
   cancelSubscription: protectedProcedure.mutation(async ({ ctx }) => {
-    return billingService.cancelSubscription(ctx.user.id)
+    return billingService.cancelSubscription(ctx.user!.id)
   }),
 })

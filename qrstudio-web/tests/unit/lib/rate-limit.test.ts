@@ -6,7 +6,7 @@ const limitMock = vi.hoisted(() => vi.fn())
 vi.mock("@upstash/ratelimit", () => {
   const mockRatelimit = vi.fn().mockImplementation(function () {
     return { limit: limitMock }
-  })
+  }) as unknown as { new (): { limit: typeof limitMock }; slidingWindow: ReturnType<typeof vi.fn> }
   mockRatelimit.slidingWindow = vi.fn().mockReturnValue({})
   return { Ratelimit: mockRatelimit }
 })
@@ -52,7 +52,7 @@ describe("middleware — tRPC rate limiting (1b.4)", () => {
     limitMock.mockReset()
   })
 
-  function createRequest(pathname: string, method = "GET", ip = "127.0.0.1"): Request {
+  function createRequest(pathname: string, method = "GET", ip = "127.0.0.1") {
     const url = new URL(`http://localhost:3000${pathname}`)
     const headers = new Headers()
     if (ip) headers.set("x-forwarded-for", ip)
@@ -62,7 +62,7 @@ describe("middleware — tRPC rate limiting (1b.4)", () => {
       url: url.toString(),
       method,
       headers,
-    } as unknown as Request
+    }
   }
 
   it("should return 429 when mutation limit is exceeded (61st mutation in 60s)", async () => {
@@ -70,7 +70,7 @@ describe("middleware — tRPC rate limiting (1b.4)", () => {
     limitMock.mockResolvedValue({ success: false, remaining: 0, limit: 60, reset: 60 })
 
     const req = createRequest("/api/trpc/", "POST")
-    const res = await middleware(req as unknown as Request)
+    const res = await middleware(req as never)
 
     expect(res.status).toBe(429)
   })
@@ -80,7 +80,7 @@ describe("middleware — tRPC rate limiting (1b.4)", () => {
     limitMock.mockResolvedValue({ success: false, remaining: 0, limit: 300, reset: 60 })
 
     const req = createRequest("/api/trpc/", "GET")
-    const res = await middleware(req as unknown as Request)
+    const res = await middleware(req as never)
 
     expect(res.status).toBe(429)
   })
@@ -89,7 +89,7 @@ describe("middleware — tRPC rate limiting (1b.4)", () => {
     limitMock.mockResolvedValue({ success: true, remaining: 59, limit: 60, reset: 60 })
 
     const req = createRequest("/api/trpc/", "POST")
-    const res = await middleware(req as unknown as Request)
+    const res = await middleware(req as never)
 
     expect(res.headers?.get("X-RateLimit-Remaining")).toBe("59")
   })
@@ -98,7 +98,7 @@ describe("middleware — tRPC rate limiting (1b.4)", () => {
     limitMock.mockResolvedValue({ success: false, remaining: 0, limit: 60, reset: 60 })
 
     const req = createRequest("/api/trpc/", "POST")
-    const res = await middleware(req as unknown as Request)
+    const res = await middleware(req as never)
 
     // The 429 response should have X-RateLimit-Remaining: "0"
     expect(res.headers?.get("X-RateLimit-Remaining")).toBe("0")
@@ -108,7 +108,7 @@ describe("middleware — tRPC rate limiting (1b.4)", () => {
     limitMock.mockResolvedValue({ success: true, remaining: 300, limit: 300, reset: 60 })
 
     const req = createRequest("/api/health/")
-    const res = await middleware(req as unknown as Request)
+    const res = await middleware(req as never)
 
     // Health checks are public prefixes, skip middleware
     expect(res.status).toBe(200)

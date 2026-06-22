@@ -501,7 +501,7 @@ test.describe("Account Settings — API Keys", () => {
 
     if (!isVisible) {
       // Demo account is FREE — skip API key tests
-      test.skip("API keys require PRO+ plan; demo account appears to be FREE")
+      test.skip(true, "API keys require PRO+ plan; demo account appears to be FREE")
       return
     }
 
@@ -515,7 +515,7 @@ test.describe("Account Settings — API Keys", () => {
   test("API-02: Create new API key → key value shown in dialog", async ({ page }) => {
     const apiHeading = page.getByText("Clés API")
     if (!(await apiHeading.isVisible().catch(() => false))) {
-      test.skip("API keys require PRO+ plan")
+      test.skip(true, "API keys require PRO+ plan")
       return
     }
 
@@ -548,7 +548,7 @@ test.describe("Account Settings — API Keys", () => {
   test("API-03: Created API key appears in keys list", async ({ page }) => {
     const apiHeading = page.getByText("Clés API")
     if (!(await apiHeading.isVisible().catch(() => false))) {
-      test.skip("API keys require PRO+ plan")
+      test.skip(true, "API keys require PRO+ plan")
       return
     }
 
@@ -575,7 +575,7 @@ test.describe("Account Settings — API Keys", () => {
   test("API-04: Create API key with empty name → validation prevents generation", async ({ page }) => {
     const apiHeading = page.getByText("Clés API")
     if (!(await apiHeading.isVisible().catch(() => false))) {
-      test.skip("API keys require PRO+ plan")
+      test.skip(true, "API keys require PRO+ plan")
       return
     }
 
@@ -599,7 +599,7 @@ test.describe("Account Settings — API Keys", () => {
   test("API-05: Revoke API key → key removed from list", async ({ page }) => {
     const apiHeading = page.getByText("Clés API")
     if (!(await apiHeading.isVisible().catch(() => false))) {
-      test.skip("API keys require PRO+ plan")
+      test.skip(true, "API keys require PRO+ plan")
       return
     }
 
@@ -638,7 +638,7 @@ test.describe("Account Settings — API Keys", () => {
   test("API-06: After closing new key dialog, key is no longer visible in plaintext", async ({ page }) => {
     const apiHeading = page.getByText("Clés API")
     if (!(await apiHeading.isVisible().catch(() => false))) {
-      test.skip("API keys require PRO+ plan")
+      test.skip(true, "API keys require PRO+ plan")
       return
     }
 

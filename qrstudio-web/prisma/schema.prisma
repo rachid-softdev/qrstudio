@@ -118,6 +118,7 @@ model Workspace {
   members   WorkspaceMember[]
   qrCodes   QRCode[]
   invitations WorkspaceInvitation[]
+  stats     WorkspaceQRStats?
 
   @@index([ownerId])
 }
