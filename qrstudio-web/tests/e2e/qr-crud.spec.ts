@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test"
 
 test.describe("QR CRUD", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/auth/login")
+    await page.goto("/login")
     await page.fill('input[name="email"]', "demo@qrstudio.app")
     await page.fill('input[name="password"]', "demo-password")
     await page.click('button[type="submit"]')
