@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test"
 
 test.describe("Auth flows", () => {
   test("register → workspace created → redirect to dashboard", async ({ page }) => {
-    await page.goto("/auth/register")
+    await page.goto("/register")
     await page.fill('input[name="name"]', "Test User")
     await page.fill('input[name="email"]', `test-${Date.now()}@example.com`)
     await page.fill('input[name="password"]', "password123")
@@ -12,7 +12,7 @@ test.describe("Auth flows", () => {
   })
 
   test("login with email/password → redirect to dashboard", async ({ page }) => {
-    await page.goto("/auth/login")
+    await page.goto("/login")
     await page.fill('input[name="email"]', "demo@qrstudio.app")
     await page.fill('input[name="password"]', "demo-password")
     await page.click('button[type="submit"]')
