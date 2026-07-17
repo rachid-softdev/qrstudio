@@ -50,8 +50,8 @@ $r = Invoke-WebRequest -Uri "http://localhost:$port/" -UseBasicParsing
 
 ### RÃ©sultat du smoke (2026-07-17)
 - Serveur : dÃ©marre et atteint Ready (voir log).
-- GET / â†’ **HTTP 500 (InternalServerError)**.
-GET / renvoie HTTP 500 (InternalServerError). Le serveur demarre (Ready, next dev). Cause probable : middleware ou page racine dependante d un env/DB non configure en local. A investiguer.
+- GET / â†’ **HTTP 307 -> /(locale)**.
+GET / renvoie HTTP 307 -> / (redirect de locale, public). CORRIGE: deps manquantes + globals.css importait 'shadcn/tailwind.css' inexistant + outline-ring/50 non defini -> 500/non-demarrage. pnpm install + correction tailwind.
 
 > âš ï¸ Sur une autre machine, le port peut diffÃ©rer (3000 occupÃ© â†’ 3001/3002â€¦). Toujours
 > lire le port rÃ©el dans le log du serveur.
@@ -60,7 +60,7 @@ GET / renvoie HTTP 500 (InternalServerError). Le serveur demarre (Ready, next de
 
 ## 3. Authentification (Ã  documenter par repo)
 
-Aucun bypass d auth dev trouve dans qrstudio-web (le repo racine n a pas de package.json ; l app est dans qrstudio-web/). Comme / renvoie 500, meme les pages publiques ne sont pas servies tant que le probleme de middleware/env n est pas resolu.
+Aucun bypass d auth dev trouve.
 
 ---
 
@@ -119,4 +119,4 @@ qrstudio-web/scripts/qa\        # (Ã  crÃ©er si campagne complÃ¨te)
 â”œâ”€â”€ driver2.ps1        # campagne N pages (meta/console/a11y/screenshot)
 â””â”€â”€ urls.txt           # URLs publiques dÃ©couvertes
 `
- FINDING: serveur boot mais racine 500 (env/DB). Voir section 2.
+ 
